@@ -8,7 +8,7 @@ dsh-superagent provides a local task board for [DeepSeek Harness](https://www.de
 
 ## Use
 
-The **Tasks** sidebar entry opens the board. Create a task with a title, request, server directory and optional images or files. Saving puts it in **Backlog**. **Start task** queues it for the Router and Worker. Questions and failures appear in **Needs attention**; ready results appear in **Awaiting review**. **Accept result** records your acceptance; merging, pushing and deploying require a separate request.
+The **superagent** sidebar entry opens the board. Create a task with a title, request, server directory and optional images or files. Saving puts it in **Backlog**. **Start task** queues it for the Router and Worker. Questions and failures appear in **Needs attention**; ready results appear in **Awaiting review**. **Accept result** records your acceptance; merging, pushing and deploying require a separate request.
 
 The board supports importance/urgency quadrants in Backlog, due dates, column visibility, directory/priority filters and a compact list view. Priority and date changes do not start models. Task details show the persisted routing choice and link to the Router's native Session. Dragging uses the same start/review/cancel actions as the buttons; a running task cannot be dragged directly to completion.
 

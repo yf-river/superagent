@@ -299,9 +299,6 @@
 .st-ui .mt-10 {
   margin-top: calc(var(--spacing) * 10);
 }
-.st-ui .mb-1 {
-  margin-bottom: calc(var(--spacing) * 1);
-}
 .st-ui .mb-2 {
   margin-bottom: calc(var(--spacing) * 2);
 }
@@ -614,6 +611,9 @@
 }
 .st-ui .overflow-y-auto {
   overflow-y: auto;
+}
+.st-ui .rounded {
+  border-radius: 0.25rem;
 }
 .st-ui .rounded-\[min\(var\(--radius-md\)\,10px\)\] {
   border-radius: min(var(--radius-md), 10px);

@@ -1,6 +1,6 @@
 # 005 Panel
 
-Open **Tasks** in the DeepSeek Harness Web sidebar. The default page is the local task board; **Settings and diagnostics** opens the retained supervision pages described below. The panel prioritizes work that needs a person, then system health and history. This document builds on [000 Philosophy](000-philosophy.md) through [004 Prompts](004-prompts.md).
+Open **superagent** in the DeepSeek Harness Web sidebar. The default page is the local task board; **Settings and diagnostics** opens the retained supervision pages described below. The panel prioritizes work that needs a person, then system health and history. This document builds on [000 Philosophy](000-philosophy.md) through [004 Prompts](004-prompts.md).
 
 ## Task board
 
@@ -9,6 +9,8 @@ The compact toolbar switches between All, Needs attention and Awaiting review. F
 Create a task with a title, request, server directory, optional images/files, priority and due date. Saving creates only a draft. Priority uses four importance/urgency quadrants in Backlog; tasks without a priority have a separate group. Counts cover all matching tasks, including unloaded pages. Priority and date may be changed during execution without sending new model input or changing queue scheduling. Dates are stored as calendar dates and compared with the viewer's local day for overdue display.
 
 Task UI uses the deployed Multica task surface as its reference: 280px columns, a horizontally scrollable board, independent vertical column scrolling, blank-area mouse panning and dnd-kit card dragging. Detail occupies the content area with a separate property sidebar. View offsets survive detail navigation and refresh. Base UI menus and dialogs share an owned overlay container; scoped Tailwind styles and embedded Inter fonts do not change the DSH shell. The editor saves Markdown through the existing task API. Copied primitives, tokens and pointer panning come from Multica source snapshot `a1a958e562d55d3b7905a9f834b8b453daa5a7ee`; rendered acceptance uses its deployed `working-20261030T194522` frontend, reused from `insights-20261030T193945`. `pnpm build` generates the scoped CSS and rejects unexpected browser runtime dependencies. Business controls for members, accounts and external agents are excluded.
+
+Backlog quadrant headings toggle their content and retain the priority icon, name and total count. Empty groups start collapsed; populated groups start expanded. Explicit choices persist in browser local storage. A collapsed drop target opens after 500ms of drag hover; this temporary expansion does not overwrite a saved choice.
 
 The task detail separates request, results and activity from its property sidebar. It starts work, appends requirements, retries a failure, requests cancellation, accepts a result or reopens a task. Drafts can be edited; requirements after start append rather than overwrite. Project and execution paths are shown separately, alongside the selected strategy, branch and base commit when available.
 

@@ -25,7 +25,7 @@ const closeDetail=()=>page.getByRole('button',{name:'返回任务',exact:true}).
 async function display(){await page.getByRole('button',{name:'显示',exact:true}).click();await page.locator('[data-slot=popover-content]').waitFor()}
 async function waitData(predicate){await assert.doesNotReject(async()=>{for(let i=0;i<80;i++){if(await predicate())return;await page.waitForTimeout(150)}throw Error('Task state did not converge')})}
 try{
- await page.goto(base.origin,{waitUntil:'networkidle'});await page.getByRole('button',{name:'任务',exact:true}).click();await page.locator('.st-card').first().waitFor();await shot('board-desktop')
+ await page.goto(base.origin,{waitUntil:'networkidle'});await page.getByRole('button',{name:'superagent',exact:true}).click();await page.locator('.st-card').first().waitFor();await shot('board-desktop')
  const column=await page.locator('.st-column').first().boundingBox();assert.equal(Math.round(column.width),280);checks.push('280px columns and independent board surface')
  await page.getByRole('button',{name:'新建任务',exact:true}).first().click();const dialog=page.getByRole('dialog');await dialog.waitFor()
  await dialog.getByRole('textbox',{name:'标题',exact:true}).fill(stamp)

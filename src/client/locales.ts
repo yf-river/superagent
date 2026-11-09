@@ -67,7 +67,7 @@ const TEXT = {
   'task.attention.failed': ['执行失败', 'Execution failed'],
   'task.attention.blocked': ['受到阻塞', 'Blocked'],
   'task.attention.waiting': ['等待处理', 'Waiting'],
-  "task.heading": ["任务", "Tasks"],
+  "task.heading": ["superagent", "superagent"],
   "task.subtitle": ["记录需求，交给 Agent 执行，由你验收。", "Capture requests, let agents work, and review the results."],
   "task.create": ["新建任务", "New task"],
   "task.edit": ["编辑任务", "Edit task"],
@@ -219,7 +219,7 @@ const TEXT = {
   sourceOff: ['已关闭', 'Off'],
   executorWaitingSetup: ['执行器等待部署检查', 'Executor waiting for the deployment check'],
   // Header, search, and tabs
-  panel: ['任务', 'Tasks'],
+  panel: ['superagent', 'superagent'],
   openMaster: ['打开主 Session', 'Open main Session'],
   pagesLabel: ['dsh-superagent 页面', 'dsh-superagent pages'],
   searchPlaceholder: ['搜索工单、线程、触发或链接', 'Search Tickets, Threads, Triggers or links'],

@@ -1,5 +1,5 @@
 /** 任务看板、创建表单和详情；完整执行过程由 DSH 会话呈现。 */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { DndContext, DragOverlay, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, useDroppable, pointerWithin, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy, sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -173,9 +173,27 @@ function MoreTasks({ onMore }: { onMore: () => void }) {
 }
 function Quadrant({ stage, priority, children, count, t }: { stage: TaskStage; priority: TaskPriority; children: ReactNode; count: number; t: T }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${stage}/${priority}`, data: { stage, priority } })
+  const key = `superagent/quadrant/${stage}/${priority}`, contentId = useId()
+  const [choice, setChoice] = useState<boolean | undefined>(() => {
+    try { const stored = localStorage.getItem(key); return stored === 'true' ? true : stored === 'false' ? false : undefined }
+    catch (error) { void error; return undefined }
+  })
+  const [springOpen, setSpringOpen] = useState(false)
+  const expanded = springOpen || (choice ?? count > 0)
+  useEffect(() => {
+    if (!isOver || expanded) return
+    const timer = setTimeout(() => setSpringOpen(true), 500)
+    return () => clearTimeout(timer)
+  }, [isOver, expanded])
+  const toggle = () => {
+    const next = !expanded; setSpringOpen(false); setChoice(next)
+    try { localStorage.setItem(key, String(next)) } catch (error) { void error /* 当前页面仍保留用户选择。 */ }
+  }
   return <section ref={setNodeRef} className={`rounded-md border p-2 ${isOver ? 'bg-accent/60 ring-2 ring-brand/25' : 'bg-background/40'}`} aria-label={t(`task.priority.${priority}`)}>
-    <div className="mb-1 flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-caption font-medium"><PriorityIcon priority={priority} t={t}/>{t(`task.priority.${priority}`)}</span><span className="text-micro text-muted-foreground">{count}</span></div>
-    {count ? <div className="space-y-2">{children}</div> : <p className="py-3 text-center text-micro text-muted-foreground">{t('task.emptyColumn')}</p>}
+    <button type="button" className="st-quadrant-toggle flex w-full items-center justify-between gap-2 rounded text-left" aria-expanded={expanded} aria-controls={contentId} onClick={toggle}>
+      <span className="flex items-center gap-1.5 text-caption font-medium"><Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12}/><PriorityIcon priority={priority} t={t}/>{t(`task.priority.${priority}`)}</span><span className="text-micro text-muted-foreground">{count}</span>
+    </button>
+    <div id={contentId} hidden={!expanded} className="mt-1">{count ? <div className="space-y-2">{children}</div> : <p className="py-3 text-center text-micro text-muted-foreground">{t('task.emptyColumn')}</p>}</div>
   </section>
 }
 function TaskLane({ stage, t, call, prefs, version, busy, canHide, onOpen, onCreate, onHide, onAction }: { stage: TaskStage; t: T; call: TaskCall; prefs: Preferences; version: number; busy: boolean; canHide: boolean; onOpen: (id: string) => void; onCreate: (priority?: TaskPriority) => void; onHide: () => void; onAction: (task: TaskView, action: string) => void }) {
@@ -204,7 +222,7 @@ function TaskLane({ stage, t, call, prefs, version, busy, canHide, onOpen, onCre
       {data && <SortableContext items={items.map(task => task.id)} strategy={verticalListSortingStrategy}>
         {prefs.quadrants && stage === 'draft' ? <div className="space-y-3">{TASK_PRIORITIES.filter(priority => priority !== 'none' || items.some(task => task.priority === 'none')).map(priority => {
           const grouped = items.filter(task => task.priority === priority)
-          return <Quadrant key={priority} stage={stage} priority={priority} t={t} count={grouped.length}>{grouped.map(card)}</Quadrant>
+          return <Quadrant key={priority} stage={stage} priority={priority} t={t} count={data.priorityCounts?.[priority] ?? grouped.length}>{grouped.map(card)}</Quadrant>
         })}{footer}</div>
         : items.length > 30 && scrollEl ? <Virtuoso customScrollParent={scrollEl} data={items} computeItemKey={(_i, task) => task.id} initialScrollTop={scroll.offset.top} initialItemCount={Math.min(items.length,10)} defaultItemHeight={140} increaseViewportBy={{top:300,bottom:300}}
           components={{Footer:() => footer}} itemContent={(index, task) => <div className={index ? 'pt-2' : ''}>{card(task)}</div>}/>

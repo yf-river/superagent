@@ -14,7 +14,7 @@ pnpm build
 dsh plugin --profile web add "link:$PWD"
 ```
 
-Restart the target DSH instance through its existing launch mechanism, then open **Tasks** in the sidebar. Installing into `web` does not require a separate profile, account, listener or port. Do not recreate an existing profile with `--from-default-profile`: that replaces its configuration.
+Restart the target DSH instance through its existing launch mechanism, then open **superagent** in the sidebar. Installing into `web` does not require a separate profile, account, listener or port. Do not recreate an existing profile with `--from-default-profile`: that replaces its configuration.
 
 The main plugin configuration accepts `stateDir` (default `<DSH_HOME>/state/superagent`), `clientOnly` (default false) and volatile prompt/context limits. Each state directory holds a lock and `orchestrator.sqlite`. Concurrent instances must use different state directories. Independent `DSH_HOME` values also separate Sessions, durable attachments, credentials and plugin configuration.
 
