@@ -22,7 +22,7 @@ An `idle` Ticket has finished its turn without an outstanding question. A Trigge
 
 ## The Executor
 
-Each Ticket gets an Executor Session named `worker-<ticket id>` and a directory named after the Ticket's short name. Directories are created under the configured execution root, which defaults to `<stateDir>/work`.
+Each Ticket gets an Executor Session named `worker-<ticket id>`. Local tasks use their selected project directory or a separate Git worktree under `<stateDir>/work`. Legacy source Tickets use a directory named after the Ticket's short name under the configured execution root.
 
 Executor Sessions run commands without approval as the operator's OS user. Their `dsh-superagent-worker` preset contains the tools needed for work and moves foreground shell commands to background jobs after 5 seconds. This lets a worker receive new messages at the next step instead of waiting for a long command to finish.
 
@@ -48,7 +48,9 @@ Worker subagents, including nested ones, use DeepSeek Harness's `standard` prese
 
 ### Preparing a Ticket directory
 
-Before the first Assignment, if the Ticket directory does not exist, the prepare command runs once with `sh` in the execution root. It has ten minutes to finish. Without a prepare command, the worker starts in an empty directory.
+Local tasks validate the selected server directory. Shared execution uses it directly; worktree execution records a base commit and task branch, creates an isolated checkout, and validates that checkout on recovery. It never copies uncommitted project changes or runs the legacy prepare command.
+
+For legacy source Tickets, before the first Assignment, if the Ticket directory does not exist, the prepare command runs once with `sh` in the execution root. It has ten minutes to finish. Without a prepare command, the worker starts in an empty directory.
 
 A failed command fails the Ticket and records its output. A retry or a person's message on one of the Ticket's Threads tries preparation again. A typical command uses `git worktree` to create a checkout. A pull request belongs to the Ticket when its branch's last path segment matches the Ticket's short name.
 
@@ -161,7 +163,7 @@ Each kind of work reports an error among the overview's system problems only aft
 Relays to the main Session keep their order, and so do notices; a failed one holds back the later ones of its kind.
 ### Source failure
 
-The GitHub Source reads each Issue, pull request and Thread on its own: a failed read keeps its error on its Thread, is read again on the next poll, and counts towards an error of the Source, which it reports after three failed polls in a row by default; any successful poll resets the count.
+The retained GitHub polling operations read each Issue, pull request and Thread independently. A failed read keeps its error on its Thread and can be retried by a later explicit poll. The bundle does not schedule background polling.
 
 GitHub answers 404 also when the agent lost access to a private repository, so a 404 is retried.
 
@@ -169,7 +171,7 @@ A notified Issue or pull request whose reads keep failing is dropped a day after
 
 Its read position stays where it was, so a later notification or a poll of its Thread reads what the failed reads missed.
 
-The Feishu event consumer reports every failure, and polling of subscribed topics keeps each failure on its Thread.
+The retained Feishu topic-read operations keep each failure on its Thread. The bundle provides no live event consumer.
 
 A malformed item in a GitHub list or a Feishu page is skipped, and the Source's state counts it.
 ### Channel failure

@@ -1,5 +1,5 @@
-/** GitHub source kind definition, notification and repository polling loops, and Cordis plugin entry. */
-import type { Context } from '@deepseek-ai/cordis'
+import { githubDeployment } from '../deployment.ts'
+/** GitHub 请求及工单记录的渠道适配和轮询操作，供任务协议及其消费方使用。 */
 import { key, type Thread } from '../core/index.ts'
 import { sameName } from '../infra/text.ts'
 import { GithubAccountsSchema } from '../deployment.ts'
@@ -10,9 +10,9 @@ import { branchCiTrigger, ciTrigger, commentTrigger, CommentSchema, githubAddres
 import { githubLink, sendGithub } from './github-channel.ts'
 import type { GithubComment, PullRef } from './github-trigger.ts'
 import { observePull, pullsOf, readPull, type Pull } from './github-pull.ts'
-import { health, sourceContext, type Health, type SourceContext } from './host.ts'
+import type { SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
-import { cursorAt, pause, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
+import { cursorAt, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
 import type { Localized, SourceKind } from './kind.ts'
 import { z } from 'zod'
 
@@ -99,50 +99,13 @@ export const githubKind: SourceKind<GithubConfig> = {
     ],
     values: ({ deployment, trigger }) => {
       const number = trigger?.threads[0]?.source === SOURCE ? Number(trigger.meta.number) || 0 : 0
-      return { DSH_SUPERAGENT_GITHUB_REPOSITORY: deployment.repository, DSH_SUPERAGENT_GITHUB_ACCOUNT: deployment.github.login, DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: deployment.github.noreply, DSH_SUPERAGENT_GITHUB_NUMBER: number ? String(number) : '',
+      return { DSH_SUPERAGENT_GITHUB_REPOSITORY: githubDeployment(deployment).repository, DSH_SUPERAGENT_GITHUB_ACCOUNT: githubDeployment(deployment).github.login, DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: githubDeployment(deployment).github.noreply, DSH_SUPERAGENT_GITHUB_NUMBER: number ? String(number) : '',
         DSH_SUPERAGENT_GITHUB_PR_HEAD: number && trigger?.meta.isPr === true ? `refs/pull/${number}/head` : '' }
     },
   },
   facts: (deployment): Record<string, Localized | string> => deployment ? {
-    cli: { zh: `当前账号 @${deployment.github.login}`, en: `Current account @${deployment.github.login}` },
+    cli: { zh: `当前账号 @${githubDeployment(deployment).github.login}`, en: `Current account @${githubDeployment(deployment).github.login}` },
   } : {},
-}
-export const name = 'dsh-superagent-github'
-export const inject = ['orchestrator']
-export function apply(ctx: Context): void {
-  ctx.effect(() => ctx.orchestrator.sources.register(githubKind), 'github: source kind')
-  ctx.effect(() => {
-    const source = sourceContext(ctx.orchestrator, githubKind)
-    const controller = new AbortController()
-    // Unhandled rejections terminate the DSH process, so a failure escaping the polling loop is reported as source health instead.
-    const running = watch(source, controller.signal)
-      .catch((error: unknown) => { source.report('github', { state: 'error', detail: String(error) }) })
-    return async () => { controller.abort(); await running }
-  })
-}
-/** Returns an error health once `failures` consecutive polls fail, or undefined so a single network interruption stays quiet. */
-export function pollFailure(failures: number, threshold: number, error: unknown): Health | undefined {
-  return failures >= threshold ? health('error', 'pollFailures', { count: String(failures), error: String(error) }) : undefined
-}
-async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
-  let interval = 60
-  let failures = 0
-  await ctx.ready
-  // Setup restarts dsh-superagent once it resolves the accounts; until then nothing is polled.
-  if (!ctx.configured()) { ctx.report('github', health('paused', 'setupPending')); return }
-  while (!signal.aborted) {
-    const config = ctx.config<GithubConfig>(SOURCE)
-    try {
-      if (config) interval = await pollRound(ctx, signal)
-      else ctx.report('github', health('paused', 'sourceOff'))
-      failures = 0
-    } catch (error) {
-      failures += 1
-      const failed = pollFailure(failures, config?.failuresBeforeError ?? 1, error)
-      if (!signal.aborted && failed) ctx.report('github', failed)
-    }
-    await pause(Math.max(interval, ctx.config<GithubConfig>(SOURCE)?.pollSeconds ?? 60) * 1000, signal)
-  }
 }
 interface Round {
   started: string; signal?: AbortSignal | undefined
@@ -218,7 +181,7 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   }
   const { headers, body } = included(raw)
   const items = validItems(ListedSchema, z.array(z.unknown()).parse(JSON.parse(body)), round.tally)
-  const { login } = ctx.deployment.github
+  const { login } = githubDeployment(ctx.deployment).github
   const fresh = (at: string | null | undefined, kind: string) =>
     kind in started && Date.parse(at ?? '') >= Math.max(Date.parse(started[kind]!), horizon)
   for (const item of items) {
@@ -300,7 +263,7 @@ async function pollNotifications(ctx: SourceContext, round: Round): Promise<{ co
   const commands = ctx.commands.withSignal(round.signal)
   const since = state.get(KV.github.since) ?? round.started
   if (state.get(KV.github.since) === undefined) state.set(KV.github.since, since)
-  const { repository } = ctx.deployment
+  const { repository } = githubDeployment(ctx.deployment)
   const path = `notifications?all=true&per_page=50&since=${encodeURIComponent(since)}`
   const raw = await commands.api(path, '--include')
   const split = raw.search(/\r?\n\r?\n/)
@@ -351,7 +314,7 @@ async function readNotified(ctx: SourceContext, round: Round, number: number, it
     if (!isPr) {
       // An Issue opened by someone other than the agent since the cursor brings its body so a mention in it reaches the gate.
       // A mention added by a later edit to the body is not read: only the author can be the actor of the body.
-      const { login } = ctx.deployment.github
+      const { login } = githubDeployment(ctx.deployment).github
       const opened = Date.parse(issue.created_at) >= Date.parse(since) && !sameName(issue.user.login, login)
       if (opened) await ctx.receive(issueTrigger(issue, login))
       await intakeComments(ctx, { number, isPr: false, url: issue.html_url }, since, round)
@@ -361,7 +324,7 @@ async function readNotified(ctx: SourceContext, round: Round, number: number, it
   if (isPr) {
     const pr = await pull(ctx, round, number)
     // Emit a PR description trigger for PRs opened since the cursor; its ID is the same as the one produced by the repository PR stream.
-    const { login } = ctx.deployment.github
+    const { login } = githubDeployment(ctx.deployment).github
     if (pr.created_at && Date.parse(pr.created_at) >= Date.parse(since) && !sameName(pr.user.login, login)) {
       const opened = { number, title: pr.title ?? '', body: pr.body, user: pr.user, created_at: pr.created_at, html_url: pr.html_url }
       await ctx.receive(pullTrigger(opened, login))
@@ -383,7 +346,7 @@ function pull(ctx: SourceContext, round: Round, number: number): Promise<Pull> {
 }
 async function intakeComments(ctx: SourceContext, ref: PullRef, since: string, round: Round): Promise<void> {
   const commands = ctx.commands.withSignal(round.signal)
-  const { login } = ctx.deployment.github
+  const { login } = githubDeployment(ctx.deployment).github
   const kinds = ref.isPr ? ['conversation', 'inline', 'review'] as const : ['conversation'] as const
   for (const kind of kinds) {
     const suffix = `&since=${encodeURIComponent(since)}`

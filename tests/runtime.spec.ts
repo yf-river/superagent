@@ -106,6 +106,7 @@ async function restart(machine: Partial<Machine> = {}, accounts: Accounts = {}):
   await runtime.stop()
   const store = new Store(join(directory, 'orchestrator.sqlite')); seed(store, accounts); store.close()
   const ctx = new Context()
+  Object.assign(agents,{list:()=>[...agents.values()]})
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
   runtime = new Runtime(ctx, testMachine({ stateDir: directory, ...machine }), restarts)
   return runtime
@@ -153,7 +154,7 @@ beforeEach(async () => {
     [SCOPED]: `global\0credential.helper\n\0global\0credential.https://github.com.helper\n${credentialHelper(AGENT())}\0`,
   }
   const ctx = new Context()
-  agents = new Map()
+  agents = Object.assign(new Map(), { list: () => [...agents.values()] })
   tools = new Map()
   sections = new Map()
   guards = new Map()
@@ -204,6 +205,7 @@ beforeEach(async () => {
   }
   jobs = jobRegistry()
   services = { agents, llm: { resolveCallConfig: vi.fn(async value => value) }, sessionController: controller, sessionPersistence: { flush: vi.fn(async () => {}), open: vi.fn(async () => ({ read: async () => ({ events: [] }), [Symbol.asyncDispose]: async () => {} })) }, workspaceRegistry: { create: async (cwd: string) => ({ id: cwd }) }, permissionPresets: { set: () => {} }, subprocess, webServer: { host: '127.0.0.1', port: 3082, register: (route: { handler: HttpHandler }) => { http = route.handler; return () => {} } }, jobs: jobs.service }
+  Object.assign(agents,{list:()=>[...agents.values()]})
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
   for (const cli of [AGENT(), OTHER(), BOT()]) writeFileSync(cli, '#!/bin/sh\n', { mode: 0o755 })
   const store = new Store(join(directory, 'orchestrator.sqlite')); seed(store); store.close()
@@ -858,7 +860,8 @@ it('reports each setup problem where the operator fixes it, and checks the agent
   // git older than 2.32 ignores GIT_CONFIG_GLOBAL and reads the operator's configuration.
   answers = { ...valid, [HELPERS]: 'file:/home/me/.gitconfig\0!gh auth git-credential\0' }
   await needs('deployment', 'gitTooOld', {})
-  await needs('github', 'repositoryUnset', {}, { github: { repository: '' } })
+  const local = await restart({}, { github: { repository: '' } }); await local.ready
+  expect(local.configured()).toBe(true); expect(local.deployment.github).toBeUndefined()
   // A broken Feishu bot leaves Feishu out and says why; GitHub work goes on.
   answers = { ...valid, [`${BOT()} config strict-mode`]: 'strict-mode: off (source: profile)' }
   const next = await restart()
@@ -1371,6 +1374,7 @@ it('refuses a second process on the same state directory before it opens the dat
   db.prepare("UPDATE kv SET value='10' WHERE key='schema'").run()
   db.close()
   const ctx = new Context()
+  Object.assign(agents,{list:()=>[...agents.values()]})
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
   expect(() => new Runtime(ctx, testMachine({ stateDir: directory }), vi.fn())).toThrow(/already being held/)
   expect(runtime.store.get(KV.store.schema)).toBe(10)
@@ -1406,7 +1410,8 @@ it('releases the database and the state directory lock when it fails to start, s
   const db = new DatabaseSync(join(directory, 'orchestrator.sqlite'))
   db.prepare("UPDATE kv SET value='99' WHERE key='schema'").run()
   db.close()
-  const context = () => { const ctx = new Context(); for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service); return ctx }
+  const context = () => { const ctx = new Context(); Object.assign(agents,{list:()=>[...agents.values()]})
+  for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service); return ctx }
   expect(() => new Runtime(context(), testMachine({ stateDir: directory }), vi.fn())).toThrow('Unsupported orchestrator database version 99')
   const fixed = new DatabaseSync(join(directory, 'orchestrator.sqlite'))
   fixed.prepare('UPDATE kv SET value=? WHERE key=?').run(String(SCHEMA_VERSION), 'schema')

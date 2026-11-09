@@ -35,7 +35,7 @@ export class Setup {
     this.variables = agentVariables(host.machine.stateDir)
   }
   /** Host command environment with agent git variables applied and the worker shim directory excluded from PATH. */
-  get commandEnvironment(): Record<string, string | undefined> { return { ...this.variables, PATH: this.path } }
+  get commandEnvironment(): Record<string, string | undefined> { return this.resolved?.github ? { ...this.variables, PATH: this.path } : {} }
   get deployment(): Deployment {
     if (!this.resolved) throw new Error(`dsh-superagent is waiting for setup: ${this.problem?.detail ?? 'setup has not run'}`)
     return this.resolved
@@ -65,7 +65,7 @@ export class Setup {
     await check.catch((error: unknown) => { if (!(error instanceof SetupError) || error.place === block.slice(7)) throw error })
   }
   async blockCommands(blocked: readonly string[]): Promise<void> {
-    if (this.resolved) await writeEnvironment(this.resolved, blocked)
+    if (this.resolved?.github) await writeEnvironment(this.resolved, blocked)
   }
   restore(): void { this.restoreEnvironment?.(); this.restoreEnvironment = undefined }
   /** Probes CLIs the way worker shells run them, using `stateDir` as `cwd` since it exists even before the repository clone is valid. */
@@ -75,6 +75,7 @@ export class Setup {
   }
   private async resolve(settings: Settings): Promise<Deployment> {
     const { context, machine, lifetime } = this.host
+    if (!settings.sources.github?.config.repository) return { ...machine }
     const probe = this.probe()
     const deployment = await resolveDeployment(machine, settings.sources.github?.config, probe)
     const feishu = await resolveFeishuBot(machine, settings.sources.feishu?.config, probe).catch((error: unknown) => {

@@ -98,7 +98,7 @@ function setupView(runtime: HttpHost) {
   const resolved = runtime.configured() ? runtime.deployment : undefined
   return {
     machine: machineView(runtime.machine), problem: runtime.setupProblem ?? null, feishuProblem: runtime.feishuProblem ?? null,
-    accounts: resolved ? { repository: resolved.repository, agent: resolved.github.login, feishu: resolved.feishu ? { appId: resolved.feishu.appId, brand: resolved.feishu.brand, botId: resolved.feishu.botId, name: resolved.feishu.name } : null } : null,
+    accounts: resolved ? { repository: resolved.repository, agent: resolved.github?.login ?? '', feishu: resolved.feishu ? { appId: resolved.feishu.appId, brand: resolved.feishu.brand, botId: resolved.feishu.botId, name: resolved.feishu.name } : null } : null,
   }
 }
 /** Build the `/orchestrator/api/state` response consumed by the management panel and `scripts/dsh-superagent status` (`docs/006-deployment.md`). */
@@ -125,7 +125,7 @@ function promptsView(runtime: HttpHost, revision: number | undefined, offset: nu
   // Each built-in part with the key of its text, which an override records as its base, and for the overrides shown whose
   // built-in text changed since, the text they were edited from when known.
   const parts = Object.entries(builtInParts()).map(([key, part]) => ({ key, ...part, base: builtInBase(part.text) }))
-  return { masterId: runtime.masterId, current: shown, defaults: defaultPrompts(), sections: TEAM_SECTIONS, skillName: SKILL_NAME.source,
+  return { masterId: runtime.masterId, current: shown, defaults: defaultPrompts(runtime.configured() && !runtime.deployment.github), sections: TEAM_SECTIONS, skillName: SKILL_NAME.source,
     builtin: Object.keys(sourceSkills), skillPrefix: SKILL_PREFIX, parts, defaultChanged: runtime.prompts.defaultChanged(shown.config),
     ...runtime.sessions.status(), ...runtime.prompts.history(offset) }
 }
@@ -228,13 +228,13 @@ function match(table: Routes, method: string, segments: string[]) {
   return undefined
 }
 export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
-  if (ctx.webServer.host !== '127.0.0.1') throw new Error('Orchestrator management requires a loopback Web server')
+  if (ctx.webServer.host !== '127.0.0.1') return () => {}
   const table = routes(runtime)
   const disposers = [
     ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
-      if (!sameOrigin(req, ctx.webServer.port)) { json(res, 403, { error: 'Same-origin management request required' }); return }
+      if (!sameOrigin(req, ctx.webServer.port ?? 0)) { json(res, 403, { error: 'Same-origin management request required' }); return }
       try {
         await runtime.ready
         const route = match(table, req.method ?? 'GET', url.pathname.slice('/orchestrator/api/'.length).split('/'))
@@ -244,4 +244,15 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
       } catch (error) { json(res, ...failure(error)) }
     } })]
   return () => { for (const dispose of disposers) dispose() }
+}
+
+/** 复用管理动作的解析和错误报告，传输鉴权由 DSH Gateway 承担。 */
+export async function dispatchManagement(runtime: HttpHost, method: string, path: string, body: unknown): Promise<{status:number;body:unknown}> {
+  try {
+    await runtime.ready
+    const url=new URL(path,'http://management.local/')
+    const route=match(routes(runtime),method,url.pathname.replace(/^\//,'').split('/'))
+    if(!route) throw new RouteError(404,'Unknown operation')
+    return {status:200,body:await route.run({params:route.params as never,query:Object.fromEntries(url.searchParams),body:async()=>body})}
+  } catch(error) {const [status,value]=failure(error);return {status,body:value}}
 }

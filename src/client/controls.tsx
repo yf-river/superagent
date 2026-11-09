@@ -9,6 +9,11 @@ import { createPortal } from 'react-dom'
 const cx = (...names: (string | false | undefined)[]) => names.filter(Boolean).join(' ')
 
 const ICON_PATHS = {
+  board: 'M4 4h6v16H4zM14 4h6v10h-6z',
+  list: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
+  folder: 'M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+  calendar: 'M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1zM4 9h16M8 3v4M16 3v4',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
   'chevron-left': 'M15 5l-7 7 7 7',
   'chevron-right': 'M9 5l7 7-7 7',
   'chevron-down': 'M5 9l7 7 7-7',

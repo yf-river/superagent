@@ -14,7 +14,7 @@ The example assumes this CLI contract:
 - `hookq reply --conversation <id> --to <message id> --key <key> --text <text>` replies under a message, once per key. For a conversation that was deleted it fails with `{"error": {"code": 410, "message": "…"}}` on standard error.
 - `hookq thread --conversation <id> --root <message id> --json`, with `--after <cursor>` for a later page, prints a page of a thread, oldest first: `{"items": […], "next": "<cursor>"}`, without `next` on the last page.
 
-Put the kind and its plugin entry in `src/sources/webhook.ts`, following `src/sources/github.ts`. If the Source grows, split translation, Channel and polling code into separate modules as the Feishu Source does.
+Put the kind and its plugin entry in `src/sources/webhook.ts`. The internal `src/sources/github.ts` descriptor shows the Source interface; its module is not a plugin entry. If a new Source grows, separate translation, Channel and polling code.
 
 ### 1. Map the events onto the domain
 
@@ -336,11 +336,10 @@ It also does not bind Threads to Ticket completion. Use `ctx.tickets.bindThread`
 Build the module as its own entry in `tsdown.config.ts`:
 
 ```ts
-entry: { index: 'src/index.ts', 'github-watch': 'src/sources/github.ts', 'feishu-watch': 'src/sources/feishu.ts',
-  'webhook-watch': 'src/sources/webhook.ts' },
+entry: { index: 'src/index.ts', 'webhook-watch': 'src/sources/webhook.ts' },
 ```
 
-Then export the built file in `package.json` by adding `"./webhook-watch": "./lib/webhook-watch.js"` to `exports`, and add the plugin to the `insert` list of the bundle's `cordis.patch.yml`, disabled, as Feishu is:
+Then export the built file in `package.json` by adding `"./webhook-watch": "./lib/webhook-watch.js"` to `exports`, and add the new plugin to the `insert` list of the bundle's `cordis.patch.yml`, disabled until configured:
 
 ```yaml
     - id: dsh-superagent-webhook

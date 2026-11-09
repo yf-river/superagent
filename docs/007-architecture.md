@@ -36,7 +36,7 @@ Shutdown cancels turns, waits for passes, effects and agents, restores the proce
 
 | Part | Module | Does |
 | --- | --- | --- |
-| Setup | `src/app/setup.ts` | Resolves the repository and the accounts by probing their CLIs the way worker shells run them, writes and applies the workers' environment and command shims, and keeps the setup problems; Settings checks a changed account through it, and restarts through it, which runs setup again |
+| Setup | `src/app/setup.ts` | Resolves local machine state; configured legacy GitHub deployments also probe their accounts, apply worker command shims and report setup problems |
 | Passes | `src/app/passes.ts` | One pass at a time, every two seconds and whenever a command asks: the due effects, then `Engine.evaluateDue`; a Source's Trigger reaches the Engine through it |
 | Outbox | `src/app/outbox.ts` | The Engine's `Outbox` port, and the only writer of the receipts: `send` keeps a message's receipt and queues its `reply` effect in one transaction, and the effect's handler sends it through `SourceRegistry.send`; a message waits while its Source is off, and is dropped when the conversation is gone or not listened to |
 | Notices | `src/app/notices.ts` | Converts domain events and worker activity into main-Session messages. `eventNotice` handles domain notices; `reportRelay` forwards questions immediately, keeps ordinary progress on its Ticket, and relays other reports; `followupRelay` names the Tickets that own a human follow-up. Relays arriving during a turn are delivered together at its next step through the DeepSeek Harness inbox |
@@ -159,7 +159,7 @@ Its interfaces are grouped by purpose:
 - **Outbox receipts:** `replyStatus` and `receipts`, written only by Outbox. Receipt operations are `get`, `waiting`, `behind`, `add`, `settle` and `withdraw`. `behind` checks whether an earlier message for the same Ticket and conversation is waiting with fewer than three failures. A withdrawn message settles with `channelGone` or `channelIgnored`. Read queries expose failed and dropped replies through `failingReplies`, `droppedReplies` and `droppedSince`.
 - **Typed key-value records:** `get`, `set`, `delete` and `keys`, using entries from `KV`.
 
-`afterCommit` runs an action only after the transaction commits, never after rollback. Runtime reads records in their stored shape; the schema 11 migration converts older supported records at startup.
+`afterCommit` runs an action only after the transaction commits, never after rollback. Runtime reads records in their stored shape; the schema 11 migration converts schema 10 records, and schema 12 adds task tables without rewriting schema 11 records.
 
 ### Effects
 
@@ -290,6 +290,16 @@ Some generic modules still refer directly to GitHub or Feishu:
 
 | Path | Responsibility |
 | --- | --- |
+| `src/app/task-model.ts` | Task and attachment view types |
+| `src/app/tasks.ts` | Persistent local task commands, review and linked execution projection |
+| `src/app/task-api.ts` | Authenticated Gateway task and management methods |
+| `src/app/task-tools.ts` | Task tools for ordinary Sessions and native attachment content |
+| `src/app/local-prompts.ts` | Local Router and Worker instructions |
+| `src/client/task-api.ts` | Connection transport for local and remote clients |
+| `src/client/tasks.tsx` | Multica task surface connected to DSH task commands |
+| `src/client/tasks.css` | Scoped task layout and Markdown presentation using Multica tokens |
+| `src/executor/local-directory.ts` | Shared directory validation and recoverable Git worktrees |
+| `src/sources/local.ts` | Owner task intake and activity replies |
 | `src/index.ts` | The main plugin entry: reads the machine settings, starts the Runtime, and gives it the restart that a save of a Source's account uses |
 | `src/deployment.ts` | The plugin `Config` and `Machine`; `resolveDeployment` and `resolveFeishuBot` read the repository and the accounts from the Source settings, each CLI run as Executor shells run it; `SETUP_FIELDS` lists the Source fields setup reads. The code names no person, account or organization |
 | `src/setup.ts` | Setup problems: `SetupError`, with a code, the place that fixes it and the English text the log, the main Session and the panel share |
@@ -362,19 +372,37 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/registry.ts` | `SourceRegistry` |
 | `src/sources/host.ts` | `SourceHost`, `SourceContext`, `Health`, `health` and the fixed health texts |
 | `src/sources/poll.ts` | What GitHub and Feishu polling share: `POLL_HORIZON_MS`, `polled`, `cursorAt`, and `pollThreads`, which keeps a failure on its Thread as `pollError` |
-| `src/sources/github.ts` | The GitHub kind and plugin entry, exported as `./github-watch`: a poll round of notifications, the pull requests of open Tickets with their CI, and subscribed Threads |
+| `src/sources/github.ts` | GitHub channel-record descriptors and explicit polling operations used by protocol consumers; no Cordis plugin entry |
 | `src/sources/github-trigger.ts` | GitHub comments, reviews, Issue bodies and CI changes as Triggers, and GitHub addresses |
 | `src/sources/github-pull.ts` | The pull request rules: which pull requests a Ticket follows (`claimPull`, `observePull`), the closes it reports to the Engine, and `pullEndNotices`, the chat notice of a Ticket that ended merged or closed |
 | `src/sources/github-channel.ts` | The GitHub Channel: comments and review thread replies, `sent` or `gone` |
 | `src/sources/github-read.ts` | CI snapshots, repository reads, the `github/` resources, and `githubThreadContext`: an Issue's or pull request's conversation by page |
-| `src/sources/feishu.ts` | The Feishu kind and plugin entry, exported as `./feishu-watch` |
+| `src/sources/feishu.ts` | Feishu channel-record descriptors and settings used by Session resource readers; no Cordis plugin entry |
 | `src/sources/feishu-trigger.ts` | Feishu messages as Triggers, by one rule for live events, history pages and topic pages |
-| `src/sources/feishu-loops.ts` | The Feishu loops: the event consumer, history recovery, chat names and polling of subscribed topics |
+| `src/sources/feishu-loops.ts` | Explicit Feishu reads for chat names, history recovery and subscribed topics |
 | `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone` |
 | `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
+| `src/client/multica/LICENSE.inter.txt` | License for the embedded Inter fonts |
+| `src/client/multica/LICENSE.multica` | License for the copied Multica components and tokens |
+| `src/client/multica/button.tsx` | Multica button variants with React 18 ref forwarding |
+| `src/client/multica/controls.tsx` | Task controls and calendar, selection and dialog adapters |
+| `src/client/multica/dropdown-menu.tsx` | Multica keyboard-accessible action menus |
+| `src/client/multica/editor.tsx` | Markdown editing and read-only rendering |
+| `src/client/multica/fonts.css` | Embedded Inter faces used by the deployed reference |
+| `src/client/multica/generated.css` | Scoped Tailwind output from build:task-css |
+| `src/client/multica/popover.tsx` | Anchored Multica popovers |
+| `src/client/multica/portal.tsx` | Owned overlay container with isolated task styling |
+| `src/client/multica/scroll-memory.ts` | View and task scroll offsets across navigation and reload |
+| `src/client/multica/select.tsx` | Multica selection controls |
+| `src/client/multica/status-icon.tsx` | Multica status geometry mapped to task stages |
+| `src/client/multica/theme.css` | Tailwind inputs for the task surface |
+| `src/client/multica/tokens.css` | Multica light and dark theme tokens |
+| `src/client/multica/use-board-drag-pan.ts` | Mouse blank-area horizontal panning |
+| `src/client/multica/utils.ts` | Multica class merging |
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
+| `src/client/preset-visibility.ts` | Client subplugin that filters the two internal presets from DSH's picker and settings snapshots while reusing the registered components, callbacks and subscriptions; unloading restores the original entries |
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs and the page of the current route |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
@@ -397,12 +425,16 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/locales.ts` | All copy in both languages, and the glossary of [001 Domain model](001-domain.md) |
 | `src/client/client.css`, `css.d.ts` | The panel's stylesheet, loaded as text |
 
-`src/sources/github.ts` and `src/sources/feishu.ts` are also the entries of the two Source plugins, built by `tsdown.config.ts` and exported in `package.json` as `./github-watch` and `./feishu-watch`. The bundle's `cordis.patch.yml` inserts the three plugins, with Feishu disabled.
+The host build has one public plugin entry, `src/index.ts`. The bundle inserts the main plugin and the Worker and Router preset declarations. Its client entry also loads the internal-preset visibility subplugin. Channel record adapters are internal modules, not separately installable listener plugins.
 
 ## Tests
 
 | Test | Covers |
 | --- | --- |
+| `tests/local-prompts.spec.ts` | Local prompt preview, team edits and source skill isolation |
+| `tests/task-transport.spec.ts` | Connection carrier invocation and error feedback |
+| `tests/client-only.spec.ts` | Desktop UI entry without a local task database or host agent services |
+| `tests/tasks.spec.ts` | Local task draft, execution, review, idempotency and persistence |
 | `tests/core-engine.spec.ts` | Domain rules on in-memory repositories: receiving, Eval, fan-out, resume and stop, interrupted Assignments, the pause, Policy changes, reports and outcomes, attaching, replies, failed deliveries and dismissed problems |
 | `tests/stage.spec.ts` | The Ticket stages, row by row |
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
@@ -437,7 +469,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/model-surface.spec.ts` | Everything models read: tools, prompts, skills and inputs, checked against the tool schemas, the execution environment and the glossary, within a size budget per role |
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
+| `tests/task-ui.spec.tsx` | Scroll restoration, pointer pan exclusions, semantic classes and overlay lifecycle |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |
+| `tests/preset-visibility.spec.tsx` | Internal-preset filtering through real SlotCore priority selection, original component interactions, snapshot subscriptions, late registration and unload recovery |
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |

@@ -117,6 +117,7 @@ export function policyVersion(settings: Settings): string {
   return key(POLICY_REVISION, JSON.stringify({ rules: settings.policy.rules, mode: settings.eval.mode, sources: settings.policy.sources }))
 }
 export function allowedSender(settings: Settings, actor: ActorRef): z.infer<typeof AllowedSchema> | undefined {
+  if (actor.source === 'local' && actor.id === 'owner') return { id: 'owner', name: '当前用户' }
   return settings.policy.sources[actor.source]?.allowed.find(entry => sameName(entry.id, actor.id))
 }
 /** Look up `actor` in the Source's `bots` policy list (validated by the Source's kind), whose messages are admitted as inferred candidates at most. */

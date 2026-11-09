@@ -46,8 +46,7 @@ export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup:
     } })
   const accounts = setup.accounts
   // Remote browsers (`memory` mode) are read-only; `unavailable` indicates `dsh-superagent` is still starting.
-  const readOnlyHint = !form ? t('deploymentNoForms') : snapshot?.mode === 'memory' ? t('deploymentReadOnly')
-    : snapshot?.status === 'loading' ? t('loading') : snapshot?.status === 'unavailable' ? t('deploymentUnavailable')
+  const readOnlyHint = !form ? t('deploymentNoForms') : snapshot?.status === 'loading' ? t('loading') : snapshot?.status === 'unavailable' ? t('deploymentUnavailable')
     : !editable ? t('deploymentReadOnly') : undefined
   const limit = (key: typeof MACHINE_LIMITS[number], label: string) => <Field label={label}>
     <Input type="number" min={LIMITS[key].min} max={LIMITS[key].max} step={1} value={draft.value[key]} disabled={!editable}

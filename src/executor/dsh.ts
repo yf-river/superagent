@@ -1,3 +1,5 @@
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { prepareLocalDirectory } from './local-directory.ts'
 /** DSH executor: manages one persistent worker session and workspace directory per ticket. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -57,6 +59,7 @@ export function transient(error: unknown): boolean {
 const ticketWorktreeName = (name: string, id: string): string => `${WorktreeNameSchema.parse(name)}-${id.slice(0, 12)}`
 /** Host dependencies used by `DshExecutor`. */
 export interface ExecutorHost {
+  content?(trigger: Trigger | undefined): ContentBlock[]
   /** DSH Cordis context: agents and their events, and the subprocess service used to run prepare commands. */
   readonly context: Context
   /** Where the Executor reports what happened to Assignments and Inputs. */
@@ -339,7 +342,7 @@ export class DshExecutor implements Executor {
     const message = inputMessage(input, trigger)
     if (message === undefined) return
     const text = message.length > ASSIGNMENT_CHARS ? JSON.stringify(capped(message, ASSIGNMENT_CHARS, inputResource(ticket.id, input.id))) : message
-    await this.host.sessions.prompt(workerSessionId(ticket.id), input.id, text, 'steer', live)
+    await this.host.sessions.prompt(workerSessionId(ticket.id), input.id, text, 'steer', live, undefined, this.host.content?.(input.kind === 'trigger' ? this.host.store.triggers.get(input.triggerId) : undefined))
   }
   /** Formats a trigger on `ticket` for the worker, including a preview of the replied-to message when the worker has not yet seen it. */
   private async triggerCard(ticket: Ticket, triggerId: string, note?: string): Promise<object | undefined> {
@@ -432,7 +435,8 @@ export class DshExecutor implements Executor {
     const workspace = ticket.execution?.directory ?? ''
     if (!current()) return
     // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before `prepare` commands existed.
-    if (!await stat(workspace).then(() => true, () => false)) {
+    if (ticket.execution?.local) await prepareLocalDirectory(ticket, this.host, () => !!current())
+    else if (!await stat(workspace).then(() => true, () => false)) {
       await this.prepareDirectory(ticket)
       if (!current()) return
     }
@@ -465,7 +469,7 @@ export class DshExecutor implements Executor {
     const requestId = later ? `assignment:${ticket.id}:${assignment.id}` : first
     await this.host.sessions.prompt(sessionId, requestId, text, 'queue',
       () => { if (!current()) throw new Error('Launch authorization changed before worker delivery') },
-      () => { this.host.engine.assignmentStarted(ticket.id, assignment.id) })
+      () => { this.host.engine.assignmentStarted(ticket.id, assignment.id) }, this.host.content?.(source))
     this.host.engine.assignmentStarted(ticket.id, assignment.id)
   }
   /** Returns the stored ticket for `agent` when it is a worker session, or undefined otherwise. */

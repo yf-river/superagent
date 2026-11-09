@@ -1,5 +1,9 @@
+import { TaskPanel } from './tasks.tsx'
+import { Button } from './controls.tsx'
+import { connectionTransport } from './task-api.ts'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 /** Browser plugin entry point registering the sidebar icon, main management panel, and Plugin Manager config view. */
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useMemo, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { SidebarPanelIconOwnerProps } from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -15,8 +19,9 @@ import { App } from './app.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
 import type { T } from './text.ts'
+import * as PresetVisibility from './preset-visibility.ts'
 
-type ClientContext = Context & { sessions: ISessions }
+type ClientContext = Context & { sessions: ISessions; connection: ConnectionHandle }
 const NS = 'dshSuperagent'
 const PANEL_ID = 'dsh-superagent' as MainPanelId
 const ENTRY = 'dsh-superagent'
@@ -29,6 +34,8 @@ function HammerIcon({ size }: SidebarPanelIconOwnerProps) {
 
 /** Mounted panel wrapper; cancels any pending Session navigation when a new one starts or the panel unmounts. */
 function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
+  const [advanced,setAdvanced]=useState(false)
+  const transport=useMemo(()=>connectionTransport(ctx.connection.rpc),[ctx])
   const pending = useRef<AbortController>(undefined)
   useEffect(() => () => { pending.current?.abort() }, [])
   const openSession = useCallback(async (id: string) => {
@@ -42,16 +49,27 @@ function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
     }
   }, [ctx, t])
   const form = usePageForm(ctx.get('configForms')?.get<Record<string, unknown>>(ENTRY))
-  return <App t={t} openSession={openSession} deploymentForm={form} />
+  return advanced ? <><Button onClick={()=>setAdvanced(false)}>{t('task.backToTasks')}</Button><App t={t} openSession={openSession} deploymentForm={form} transport={transport}/></>
+    : <TaskPanel t={t} transport={transport} openSession={openSession} onSettings={()=>setAdvanced(true)}/>
 }
 
-export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace']
+export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'connection', 'layout']
 /** Registers the panel, sidebar icon, and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
 export function apply(ctx: ClientContext): void {
+  ctx.plugin(PresetVisibility)
+  ctx.effect(()=>{
+    const open=()=>{if(/^#superagent\/tasks\/[a-f0-9-]{36}$/.test(window.location.hash)) ctx.layout.selectPanel(PANEL_ID)}
+    window.addEventListener('hashchange',open)
+    return ()=>window.removeEventListener('hashchange',open)
+  },'superagent: task links')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-superagent: dictionaries')
   const t = ctx.locale.bind(NS)
-  ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS, inject: () => ({}) },
-    (props: { t: T }) => <Mounted ctx={ctx} t={props.t} />))
+  ctx.slots.inject('main', () => {
+    const dispose=ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS, inject: () => ({}) },
+      (props: { t: T }) => <Mounted ctx={ctx} t={props.t} />)
+    if(/^#superagent\/tasks\/[a-f0-9-]{36}$/.test(window.location.hash)) ctx.layout.selectPanel(PANEL_ID)
+    return dispose
+  })
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 10, label: () => t('panel'), locale: NS }, HammerIcon))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))

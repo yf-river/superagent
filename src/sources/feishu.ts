@@ -1,10 +1,9 @@
-/** Feishu source kind definition, policy synchronization, and Cordis plugin entry. */
-import type { Context } from '@deepseek-ai/cordis'
+/** 飞书渠道记录的解析、策略和读取适配，供会话资源及工单视图使用。 */
 import { z } from 'zod'
 import { FeishuBotSchema } from '../deployment.ts'
 import { feishuLink, sendFeishu } from './feishu-channel.ts'
 import { feishuThreadContext } from './feishu-read.ts'
-import { refreshChatNames, runFeishu } from './feishu-loops.ts'
+import { refreshChatNames } from './feishu-loops.ts'
 import { SOURCE, feishuTriggerId } from './feishu-trigger.ts'
 import { sourceContext } from './host.ts'
 import type { Localized, SourceKind } from './kind.ts'
@@ -13,7 +12,7 @@ import type { SourceRegistry } from './registry.ts'
 export { SOURCE, feishuRef, feishuThreadId, feishuTime, feishuTrigger, feishuTriggerId, historyEvent, withMentionNames }
   from './feishu-trigger.ts'
 export type { FeishuEvent } from './feishu-trigger.ts'
-export { backfillChat, consumerRetry, pollThreads, refreshChatNames, threadRef } from './feishu-loops.ts'
+export { backfillChat, pollThreads, refreshChatNames, threadRef } from './feishu-loops.ts'
 const MembersSchema = z.looseObject({
   users: z.array(z.looseObject({ member_id: z.string(), name: z.string() })),
   has_more: z.boolean(), truncations: z.array(z.unknown()).optional(),
@@ -124,16 +123,5 @@ export const feishuKind: SourceKind<FeishuConfig> = {
   },
   facts: (deployment): Record<string, Localized | string> => deployment?.feishu ? { cli: { zh: `当前机器人 ${deployment.feishu.name || deployment.feishu.botId}`, en: `Current bot ${deployment.feishu.name || deployment.feishu.botId}` } } : {},
 }
-/** Returns the Feishu Source's settings, falling back to schema defaults while the Feishu plugin is disabled. */
+/** 读取已登记的飞书来源配置，未登记时使用渠道读取所需的默认值。 */
 export const feishuSettings = (sources: SourceRegistry): FeishuConfig => sources.instance<FeishuConfig>(SOURCE)?.config ?? FeishuConfigSchema.parse({})
-
-export const name = 'dsh-superagent-feishu'
-export const inject = ['orchestrator']
-export function apply(ctx: Context): void {
-  ctx.effect(() => ctx.orchestrator.sources.register(feishuKind), 'feishu: source kind')
-  ctx.effect(() => {
-    const controller = new AbortController()
-    const running = runFeishu(sourceContext(ctx.orchestrator, feishuKind), controller.signal)
-    return async () => { controller.abort(); await running }
-  })
-}

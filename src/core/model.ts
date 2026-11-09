@@ -312,7 +312,11 @@ export interface Ticket {
  * Thread closed; the ticket then ends unless its work has not finished (see `Tickets.unfinished`).
  */
 export interface Follow { thread: string; own: boolean; closed?: { at: string; outcome: 'merged' | 'closed' } }
-export interface Execution { name: string; directory: string; assignment: string }
+export interface Execution {
+  name: string; directory: string; assignment: string
+  /** 本地任务首次分派的目录选择；重试与恢复沿用。 */
+  local?: { strategy: 'shared' | 'worktree'; projectDirectory: string; reason: string; branch?: string; baseCommit?: string }
+}
 
 /** Whether a ticket is open: it has not ended. */
 export const liveTicket = (ticket: Pick<Ticket, 'ended'>): boolean => !ticket.ended

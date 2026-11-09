@@ -1,14 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Engine, MemoryRepositories, key, type Assessor, type Executor, type Thread, type Ticket, type Trigger } from '../src/core/index.ts'
-import { backfillChat, consumerRetry, feishuKind, feishuTriggerId, feishuRef, feishuTime, feishuTrigger, historyEvent }
+import { backfillChat, feishuKind, feishuTriggerId, feishuRef, feishuTime, feishuTrigger, historyEvent }
   from '../src/sources/feishu.ts'
 import { KV } from '../src/kv.ts'
-import { apply as applyFeishu, pollThreads as pollFeishuThreads } from '../src/sources/feishu.ts'
-import { runFeishu } from '../src/sources/feishu-loops.ts'
+import { pollThreads as pollFeishuThreads } from '../src/sources/feishu.ts'
 import { commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
 import { claimPull, observePull, pullEndNotices, pullOf, ticketBranch, type Pull } from '../src/sources/github-pull.ts'
 import { ciCounts, ciFact, ciSummary } from '../src/sources/github-read.ts'
-import { apply as applyGithub, githubKind, pollFailure, pollRound } from '../src/sources/github.ts'
+import { githubKind, pollRound } from '../src/sources/github.ts'
 import { pollThreads as pollGithubThreads } from '../src/sources/github.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { cursorAt, POLL_HORIZON_MS } from '../src/sources/poll.ts'
@@ -19,7 +18,7 @@ import { testDeployment } from './fixtures/deployment.ts'
 import { SettingsSchema, settingsPolicy } from '../src/policy.ts'
 import { sourceContextOf, type SourceContextDeps } from '../src/app/source-context.ts'
 import { SetupError, type SetupProblem } from '../src/setup.ts'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -90,28 +89,6 @@ function github(h: ReturnType<typeof host>, routes: Record<string, unknown>): st
 }
 const bare = (reads: string[]) => reads.map(path => path.split('?')[0])
 describe('feishu source', () => {
-  it('registers its kind without a bot, and names on its health what setup still needs', async () => {
-    const run = async (overrides: Partial<SourceContextDeps>) => {
-      // The fixture's registry already holds the kind; this one starts empty so the plugin's registration shows.
-      const value = host({ sources: emptyRegistry(), ...overrides })
-      const disposers: (() => unknown)[] = []
-      applyFeishu({ orchestrator: value, effect: (effect: () => () => unknown) => { disposers.push(effect()) } } as never)
-      await vi.waitFor(() => expect(value.health.history).toBeDefined())
-      const registered = value.sources.kind('feishu')
-      // Snapshot health before disposal clears the registered entries.
-      const health = { ...value.health }
-      for (const dispose of disposers) await dispose()
-      return { ...value, registered, health }
-    }
-    const unset = await run({ deployment: testDeployment({ feishu: undefined }) })
-    expect(unset.registered).toBe(feishuKind)
-    expect(unset.health).toMatchObject({ feishu: { state: 'paused', code: 'feishuCliUnset' }, history: { state: 'paused', code: 'feishuBotMissing' } })
-    const problem = new SetupError('feishuBotNotReady', { app: 'cli_bot', status: 'missing' }).problem
-    const refused = await run({ deployment: testDeployment({ feishu: undefined }), feishuProblem: problem })
-    // A failed bot check waits for the operator's fix and a check; it does not retry by itself like a polling error.
-    expect(refused.health.feishu).toEqual({ state: 'paused', detail: problem.detail })
-    expect((await run({ configured: () => false })).health.feishu).toEqual({ state: 'paused', detail: 'Waiting for the deployment check', code: 'setupPending' })
-  })
   it('translates live events into triggers keyed by root message, and drops the bot\'s own messages', () => {
     const trigger = feishuTrigger({ message_id: 'om_2', chat_id: 'oc_1', chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: 'hi', create_time: '1757376000000', mentions: [{ id: 'cli_bot' }], root_id: 'om_1', parent_id: 'om_1', thread_id: 'omt_1', message_app_link: 'https://applink/x' }, 'ou_bot', 'cli_bot')!
     expect(trigger).toMatchObject({ id: key('feishu', 'om_2'), source: 'feishu', threads: [{ source: 'feishu', id: 'oc_1:om_1' }], actor: { source: 'feishu', id: MEMBER }, human: true, at: '2025-09-09T00:00:00.000Z', url: 'https://applink/x', channel: { source: 'feishu', address: { chatId: 'oc_1', messageId: 'om_2' } }, meta: { chatId: 'oc_1', direct: false, mentioned: true, rootId: 'om_1', parentId: 'om_1', threadId: 'omt_1', messageId: 'om_2' } })
@@ -148,7 +125,7 @@ describe('feishu source', () => {
     expect(h.store.threads.get('feishu:oc_1:om_root')?.meta.pollError).toContain('rate limited')
     h.store.close()
   })
-  it('translates a polled topic reply as the event consumer translates the live event', async () => {
+  it('normalizes a polled topic reply and its corresponding message event identically', async () => {
     const h = host()
     // A direct-message chat the bot knows from its events.
     h.store.set('feishu-chats', { oc_dm: true })
@@ -300,12 +277,6 @@ describe('feishu source', () => {
     expect(tally.skipped).toBe(1)
     expect(h.receive.mock.calls.map(([trigger]) => trigger.meta.messageId)).toEqual(['om_good'])
     h.store.close()
-  })
-  it('waits a second before restarting the event consumer after a run that stayed up for a minute, and backs off otherwise', () => {
-    expect(consumerRetry(undefined, 0)).toBe(1000)
-    expect(consumerRetry(1000, 500)).toBe(2000)
-    expect(consumerRetry(32_000, 500)).toBe(60_000)
-    expect(consumerRetry(60_000, 120_000)).toBe(1000)
   })
   it('syncs its part of the Policy from the sync chat: people who left are removed, names follow the chat, new people are appended', async () => {
     const h = host()
@@ -759,58 +730,6 @@ describe('github source', () => {
     expect(h.health.github).toMatchObject({ state: 'ready', detail: expect.stringContaining('deleted on GitHub: #5, #7, #8') })
     h.store.close()
   })
-  it('waits for setup, pauses while the Source is off, and counts only consecutive failed polls towards an error', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    try {
-      const start = async (overrides: Partial<SourceContextDeps>,
-        github: { enabled: boolean; config: Record<string, unknown> } = { enabled: true, config: {} }) => {
-        const board = new HealthBoard()
-        const settings = SettingsSchema.parse({ sources: { github } })
-        const sources = new SourceRegistry(() => settings, board)
-        healthOf.set(sources, board)
-        const value = host({ sources, ...overrides })
-        const disposers: (() => unknown)[] = []
-        applyGithub({ orchestrator: value, effect: (effect: () => () => unknown) => { disposers.push(effect()) } } as never)
-        return { value, stop: async () => { for (const dispose of disposers) await dispose(); value.store.close() } }
-      }
-      const pending = await start({ configured: () => false })
-      await vi.waitFor(() => expect(pending.value.health.github).toMatchObject({ state: 'paused', code: 'setupPending' }))
-      await pending.stop()
-      const off = await start({}, { enabled: false, config: {} })
-      await vi.waitFor(() => expect(off.value.health.github).toMatchObject({ state: 'paused', code: 'sourceOff' }))
-      await off.stop()
-      // Rounds fail, succeed, fail, fail: only the last two in a row make the error. A round reads through a Commands of its own.
-      const outcomes = [false, true, false, false]
-      let round = 0
-      const run = vi.spyOn(Commands.prototype, 'run').mockImplementation(async () => {
-        if (!outcomes[round++]) throw refused(502, 'Bad Gateway')
-        return 'HTTP/2.0 200 OK\r\n\r\n[]'
-      })
-      const flaky = await start({}, { enabled: true, config: { failuresBeforeError: 2 } })
-      // Each round reads its notifications once, then waits a minute for the next.
-      const until = async (count: number) => {
-        while (round < count) {
-          await vi.waitFor(() => expect(round).toBeGreaterThan(0))
-          if (round < count) await vi.advanceTimersByTimeAsync(60_000)
-        }
-      }
-      await until(3)
-      expect(flaky.value.health.github).toMatchObject({ state: 'ready' })
-      await until(4)
-      await vi.waitFor(() => expect(flaky.value.health.github).toMatchObject({ state: 'error', code: 'pollFailures', values: { count: '2' } }))
-      await flaky.stop()
-      run.mockRestore()
-    } finally { vi.useRealTimers() }
-  })
-  it('reports a failure that escapes the polling loop as its health instead of an unhandled rejection', async () => {
-    // The fixture's registry already holds the kind; this one starts empty so the plugin can register it.
-    const value = host({ sources: emptyRegistry(), ready: Promise.reject(new Error('lock held')) })
-    const disposers: (() => unknown)[] = []
-    applyGithub({ orchestrator: value, effect: (effect: () => () => unknown) => { disposers.push(effect()) } } as never)
-    await vi.waitFor(() => expect(value.health.github).toMatchObject({ state: 'error', detail: expect.stringContaining('lock held') }))
-    for (const dispose of disposers) await dispose()
-    value.store.close()
-  })
   /** An Issue as GitHub returns it, opened by alice. */
   const issue = (number: number, fields: Partial<GithubIssue> = {}): GithubIssue => ({ id: 1000 + number, number, title: 'Login fails',
     body: 'details', state: 'open', created_at: '2026-09-09T00:00:00Z', html_url: `https://github.com/acme/widgets/issues/${number}`,
@@ -1018,173 +937,6 @@ describe('source context', () => {
     h.store.close()
   })
 })
-it('reports GitHub as failing only after the configured number of consecutive failed polls', () => {
-  const eof = new Error('Get "https://api.github.com/x": EOF')
-  expect(pollFailure(1, 3, eof)).toBeUndefined()
-  expect(pollFailure(2, 3, eof)).toBeUndefined()
-  expect(pollFailure(3, 3, eof)).toEqual({ state: 'error', detail: '3 consecutive failed polls; last: Error: Get "https://api.github.com/x": EOF', code: 'pollFailures', values: { count: '3', error: 'Error: Get "https://api.github.com/x": EOF' } })
-  expect(githubKind.schema.parse({})).toEqual({ repository: '', cli: '', pollSeconds: 60, failuresBeforeError: 3, observeIssues: false,
-    observePulls: false, observeComments: false, observeCi: false })
-})
-describe('feishu event consumer', () => {
-  let dir: string
-  let controller: AbortController
-  let running: Promise<unknown> | undefined
-  // The fake CLI is a real process, which starts slower while the whole suite runs.
-  const until = { timeout: 10_000 }
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'feishu-consumer-')); controller = new AbortController() })
-  afterEach(async () => {
-    controller.abort()
-    await running
-    vi.useRealTimers()
-    rmSync(dir, { recursive: true, force: true })
-  })
-  /**
-   * A bot CLI whose `event consume` behaves as `mode` says: `never` gets ready, `warn` warns once ready, `ready` stays up,
-   * and `flaky` exits after its first ready. It records each run and the PID of the latest.
-   */
-  function cli(mode: 'never' | 'warn' | 'ready' | 'flaky' | 'events' | 'late'): string {
-    const path = join(dir, 'lark-bot')
-    writeFileSync(path, `#!/bin/sh
-  [ "$1" = event ] || { echo '{"ok":true,"data":{}}'; exit 0; }
-  n=$(cat '${dir}/runs' 2>/dev/null || echo 0); n=$((n + 1)); echo $n > '${dir}/runs'; echo $$ > '${dir}/pid'
-  case ${mode} in
-    never) exec sleep 60 ;;
-    warn) echo '[event] ready' >&2; echo 'WARN the connection was reset' >&2; exec sleep 60 ;;
-    ready) echo '[event] ready' >&2; exec sleep 60 ;;
-    flaky) echo '[event] ready' >&2; [ "$n" -gt 1 ] && exec sleep 60; exit 1 ;;
-    events) echo '[event] ready' >&2; cat '${dir}/events'; touch '${dir}/printed'; exec sleep 60 ;;
-    late) echo '[event] ready' >&2; sleep 1; cat '${dir}/events'; touch '${dir}/printed'; exec sleep 60 ;;
-  esac
-  `, { mode: 0o755 })
-    return path
-  }
-  const runs = () => existsSync(join(dir, 'runs')) ? Number(readFileSync(join(dir, 'runs'), 'utf8')) : 0
-  const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
-  /** The Feishu Source's context, on a fresh Store whose Feishu Source is on, with `cli` as the bot CLI. */
-  function consumerSource(path: string, config: Record<string, unknown> = { chats: [] }) {
-    const store = new Store(join(dir, 'db.sqlite'))
-    store.saveSettings(SettingsSchema.parse({ sources: { feishu: { enabled: true, config } } }))
-    const board = new HealthBoard()
-    const sources = new SourceRegistry(() => store.settings(), board)
-    sources.register(feishuKind)
-    const assessor: Assessor = { request: vi.fn(async () => {}) }
-    const executor: Executor = { start: vi.fn(async () => {}), deliver: vi.fn(async () => {}), stop: vi.fn(async () => {}) }
-    const outbox = { send: () => {}, status: () => undefined, withdraw: () => {} }
-    const policy = () => settingsPolicy(store.settings(), sources)
-    const engine = new Engine({ repo: store, scope: sources, policy, assessor, executor, outbox })
-    const deployment = testDeployment({ feishu: { ...testDeployment().feishu!, cli: path } })
-    const health = board.all
-    const commands = new Commands(() => deployment, {}, controller.signal)
-    const deps: SourceContextDeps = { store, engine, outbox: { send: () => {} }, commands, sources, deployment, ready: Promise.resolve(), configured: () => true,
-      receive: (trigger: Trigger) => engine.receive(trigger) }
-    const turnOff = () => store.saveSettings(SettingsSchema.parse({ sources: { feishu: { enabled: false, config: { chats: [] } } } }))
-    return { ctx: sourceContextOf(deps, feishuKind), health, store, turnOff }
-  }
-
-  /** A message event line as `event consume` prints it; a group message mentions the bot. */
-  const event = (id: string, chat: string, type: 'group' | 'p2p') => JSON.stringify({ message_id: id, chat_id: chat, chat_type: type,
-    sender_id: 'ou_alice', sender_type: 'user', content: 'fix it', create_time: String(Date.now()),
-    ...type === 'group' ? { mentions: [{ id: 'ou_bot', name: 'Bot' }] } : {} })
-  it('takes in the event lines it reads, records each chat as direct or not, and reports a malformed line without stopping', async () => {
-    writeFileSync(join(dir, 'events'), [event('om_1', 'oc_group', 'group'), event('om_2', 'oc_dm', 'p2p'), 'not json',
-      event('om_3', 'oc_group', 'group')].join('\n') + '\n')
-    const { ctx, health, store } = consumerSource(cli('events'))
-    running = runFeishu(ctx, controller.signal)
-    await vi.waitFor(() => expect(store.triggers.get(feishuTriggerId('om_3'))).toBeDefined(), until)
-    expect(['om_1', 'om_2'].map(id => store.triggers.get(feishuTriggerId(id))?.meta.direct)).toEqual([false, true])
-    expect(store.get(KV.feishu.chats)).toEqual({ oc_group: false, oc_dm: true })
-    expect(health.feishu).toMatchObject({ state: 'error', detail: expect.stringContaining('JSON') })
-    controller.abort(); await running; store.close()
-  }, 20_000)
-  it('drops the events it reads once the Source is off', async () => {
-    writeFileSync(join(dir, 'events'), event('om_9', 'oc_group', 'group') + '\n')
-    const { ctx, health, store, turnOff } = consumerSource(cli('late'))
-    running = runFeishu(ctx, controller.signal)
-    await vi.waitFor(() => expect(health.feishu).toMatchObject({ state: 'ready' }), until)
-    turnOff()
-    // The CLI prints the event a second after it is ready, before the consumer stops for the Source being off.
-    await vi.waitFor(() => expect(existsSync(join(dir, 'printed'))).toBe(true), until)
-    await new Promise(resolve => setTimeout(resolve, 300))
-    expect(store.triggers.get(feishuTriggerId('om_9'))).toBeUndefined()
-    controller.abort(); await running; store.close()
-  }, 20_000)
-  it('keeps a chat\'s history cursor when its read fails, and recovers known direct chats only while direct messages are on', async () => {
-    const hour = new Date(Date.now() - 3_600_000).toISOString()
-    const recovered = async (directMessages: boolean) => {
-      const chat = (chatId: string) => ({ chatId, listen: 'mentions' })
-      const { ctx, health, store } = consumerSource(cli('ready'), { chats: [chat('oc_a'), chat('oc_b')], directMessages })
-      store.set(KV.feishu.chats, { oc_dm: true, oc_a: false })
-      for (const chat of ['oc_a', 'oc_b', 'oc_dm']) store.set(KV.feishu.history(chat), hour)
-      const chats: string[] = []
-      const lark = vi.spyOn(Commands.prototype, 'lark').mockImplementation(async args => {
-        const params = args[2] === '/open-apis/im/v1/messages' ? JSON.parse(args.at(-1)!) as { container_id: string } : undefined
-        if (params) chats.push(params.container_id)
-        if (params?.container_id === 'oc_a') throw new Error('rate limited')
-        return { has_more: false, items: [] }
-      })
-      const stop = new AbortController()
-      const loops = runFeishu(ctx, AbortSignal.any([stop.signal, controller.signal]))
-      await vi.waitFor(() => expect(['ready', 'error']).toContain(health.history?.state), until)
-      stop.abort(); await loops; lark.mockRestore()
-      const cursors = Object.fromEntries(['oc_a', 'oc_b', 'oc_dm'].map(chat => [chat, store.get(KV.feishu.history(chat))]))
-      const result = { chats, cursors, history: health.history }
-      store.close(); rmSync(join(dir, 'db.sqlite'), { force: true }); rmSync(join(dir, 'db.sqlite-wal'), { force: true })
-      rmSync(join(dir, 'db.sqlite-shm'), { force: true })
-      return result
-    }
-    const on = await recovered(true)
-    expect(on.chats).toEqual(['oc_a', 'oc_b', 'oc_dm'])
-    expect(on.history).toMatchObject({ state: 'error', detail: expect.stringContaining('oc_a: Error: rate limited') })
-    expect(on.cursors.oc_a).toBe(hour)
-    expect(Date.parse(on.cursors.oc_b!)).toBeGreaterThan(Date.parse(hour))
-    expect(Date.parse(on.cursors.oc_dm!)).toBeGreaterThan(Date.parse(hour))
-    const off = await recovered(false)
-    expect(off.chats).toEqual(['oc_a', 'oc_b'])
-    expect(off.cursors.oc_dm).toBe(hour)
-  }, 20_000)
-  it('reports an error when the consumer is not ready within 45 seconds', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const { ctx, health, store } = consumerSource(cli('never'))
-    running = runFeishu(ctx, controller.signal)
-    await vi.waitFor(() => expect(runs()).toBe(1), until)
-    const pid = Number(readFileSync(join(dir, 'pid'), 'utf8'))
-    await vi.advanceTimersByTimeAsync(45_000)
-    await vi.waitFor(() => expect(health.feishu).toMatchObject({ state: 'error',
-      detail: expect.stringContaining('did not become ready within 45 seconds') }), until)
-    expect(alive(pid)).toBe(false)
-    controller.abort(); await running; store.close()
-  }, 20_000)
-  it('reports a warning the consumer prints as an error', async () => {
-    const { ctx, health, store } = consumerSource(cli('warn'))
-    running = runFeishu(ctx, controller.signal)
-    await vi.waitFor(() => expect(health.feishu).toMatchObject({ state: 'error', detail: 'WARN the connection was reset' }), until)
-    controller.abort(); await running; store.close()
-  }, 20_000)
-  it('stops the consumer within five seconds once the Source is off', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
-    const { ctx, health, store, turnOff } = consumerSource(cli('ready'))
-    running = runFeishu(ctx, controller.signal)
-    await vi.waitFor(() => expect(health.feishu).toMatchObject({ state: 'ready', detail: 'Listening for bot events' }), until)
-    const pid = Number(readFileSync(join(dir, 'pid'), 'utf8'))
-    turnOff()
-    await vi.advanceTimersByTimeAsync(5000)
-    await vi.waitFor(() => expect(health.feishu).toMatchObject({ state: 'paused', code: 'sourceOff' }), until)
-    expect(alive(pid)).toBe(false)
-    controller.abort(); await running; store.close()
-  }, 20_000)
-  it('starts the consumer again after it exits, and is ready once the next run listens', async () => {
-    const { ctx, health, store } = consumerSource(cli('flaky'))
-    running = runFeishu(ctx, controller.signal)
-    const exited = { state: 'error', detail: expect.stringContaining('exited (1, ready=true)') }
-    await vi.waitFor(() => expect(health.feishu).toMatchObject(exited), until)
-    // The first restart waits a second.
-    await vi.waitFor(() => expect(runs()).toBe(2), until)
-    await vi.waitFor(() => expect(health.feishu).toMatchObject({ state: 'ready' }), until)
-    controller.abort(); await running; store.close()
-  }, 20_000)
-})
-
 describe('observing the GitHub repository', () => {
   /** Hour `hour` of the day before yesterday, well within the polling horizon. */
   const at = (hour: number) => new Date(Math.floor(Date.now() / 86_400_000 - 2) * 86_400_000 + hour * 3_600_000).toISOString()

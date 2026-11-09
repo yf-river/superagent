@@ -78,6 +78,7 @@ async function own(file: string, text: string, mode = 0o644): Promise<void> {
  */
 export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' | 'repository' | 'github' | 'feishu'>, blockedCommands: readonly string[]): Promise<void> {
   const { stateDir, repository, github, feishu } = deployment
+  if (!github) throw new Error('GitHub execution is not configured')
   const dir = workerBin(stateDir)
   await mkdir(dir, { recursive: true })
   const before = await readdir(dir)
@@ -136,7 +137,9 @@ export async function runAsWorker(subprocess: SubprocessRuntime, argv: string[],
 
 /** Verifies that worker git invocations resolve the deployment's GitHub credential helper. */
 export async function verifyEnvironment(deployment: Pick<Deployment, 'github' | 'stateDir'>, subprocess: SubprocessRuntime, signal: AbortSignal): Promise<void> {
-  const { github, stateDir } = deployment
+  const { github } = deployment
+  if (!github) throw new Error('GitHub execution is not configured')
+  const { stateDir } = deployment
   // `-z` separates fields with NUL and never quotes paths.
   const helpers = (await runAsWorker(subprocess, ['git', 'config', '-z', '--show-origin', '--get-all', 'credential.https://github.com.helper'], stateDir, AbortSignal.any([signal, AbortSignal.timeout(60_000)])).catch(() => '')).split('\0')
   if (helpers.join('\0') !== [`file:${workerGitConfig(stateDir)}`, credentialHelper(github.cli), ''].join('\0')) throw new SetupError('gitTooOld')

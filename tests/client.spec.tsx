@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, useState, type ComponentType } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApiError, caller, usePoll } from '../src/client/api.ts'
 import { apply } from '../src/client/index.tsx'
 import { zh } from '../src/client/locales.ts'
@@ -9,6 +9,7 @@ import { SettingsSchema } from '../src/policy.ts'
 
 declare global { var IS_REACT_ACT_ENVIRONMENT: boolean }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }))
 
 type Entry = { options: { name: string; id?: string; key?: string; order?: number; locale?: string; label?: () => string }; component: ComponentType<Record<string, unknown>> }
 const t = ((key: keyof typeof zh) => zh[key] ?? key) as never
@@ -16,6 +17,9 @@ function fixture(listed: string[]) {
   const entries: Entry[] = []
   const dictionaries: Record<string, unknown> = {}
   const ctx = {
+    plugin: vi.fn(),
+    layout: {selectPanel:vi.fn()},
+    connection: {rpc: {call: async (_channel:string,_endpoint:string,{args:{input}}:{args:{input:{method:string;path:string;body?:unknown}}}) => {const response=await fetch('/orchestrator/api/'+input.path,{method:input.method});return {ok:true,value:{status:response.status,body:await response.json()}}}}},
     slots: { inject: (_name: string, register: () => void) => register(), register: (options: Entry['options'], component: Entry['component']) => { entries.push({ options, component }); return () => {} } },
     locale: { register: (ns: string, value: unknown) => { dictionaries[ns] = value; return () => {} }, bind: () => t },
     effect: (effect: () => unknown) => { effect() },
@@ -36,27 +40,33 @@ async function render(entry: Entry, props: Record<string, unknown>) {
   return { container, dispose: () => { act(() => { root.unmount() }); container.remove() } }
 }
 const openMaster = async (container: HTMLElement) => {
+  const settings=[...container.querySelectorAll('button')].find(item=>item.textContent===zh['task.settings'])!
+  await act(async()=>{settings.click()})
+  for(let i=0;i<5;i++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0))})
   const button = [...container.querySelectorAll('button')].find(item => item.textContent === zh.openMaster)!
   await act(async () => { button.click() })
   for (let i = 0; i < 5; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
 const serve = () => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
   const path = new URL(url, 'http://127.0.0.1').pathname.replace('/orchestrator/api/', '')
+  if (path === 'tasks') return Response.json({items:[],counts:{draft:0,queued:0,working:0,waiting:0,review:0,done:0,cancelled:0}})
+  if (path === 'task-directories') return Response.json([])
   if (path === 'overview') return Response.json({ problems: [], person: [], executor: { running: 0, queued: 0, maxWorkers: 3, idle: 0 }, flow: { triggers: 0, filtered: 0, judged: 0, accepted: 0, evaluating: 0 }, policyVersion: 'v' })
   if (path === 'state') return Response.json({ masterId: 'master', settings: SettingsSchema.parse({}), revisions: { policy: 0, eval: 0, executor: 0 }, sources: [], policy_version: 'v', health: {}, outgoing: [], load: { running: 0, queued: 0 },
     setup: { machine: { stateDir: '/srv/state', worktreeRoot: '/srv/state/worktrees', blockedCommands: [], promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000 }, problem: null, feishuProblem: null, accounts: null } })
   return Response.json({ error: 'unavailable' }, { status: 503 })
 }))
-afterEach(() => { vi.unstubAllGlobals() })
+afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear() })
 
 it('registers a localized main panel, sidebar entry and Plugin Manager row page, and no settings section', () => {
-  const { entries, dictionaries, main, nav } = fixture([])
+  const { ctx, entries, dictionaries, main, nav } = fixture([])
+  expect(ctx.plugin).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'superagent-preset-visibility' }))
   expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'plugins.row.config'])
   expect(entries[2]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
   expect(Object.keys(dictionaries)).toEqual(['dshSuperagent'])
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })
-  expect(nav.options.label?.()).toBe('Superagent')
+  expect(nav.options.label?.()).toBe('任务')
 })
 
 it('opens a listed Session through the workspace from the main panel', async () => {

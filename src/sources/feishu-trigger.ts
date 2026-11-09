@@ -7,7 +7,7 @@ export const SOURCE = 'feishu'
 /** Constructs a Feishu reply channel address; records `direct` explicitly because both group and direct chat IDs start with `oc_`. */
 export const feishuChannel = (chatId: string, messageId: string, direct = false): ChannelRef =>
   ({ source: SOURCE, thread: `feishu:${chatId}`, address: { chatId, messageId, ...direct ? { direct: 'true' } : {} } })
-/** A message as the live event consumer prints it; the history and topic-page paths normalize what they read into this shape. */
+/** 飞书消息的规范字段；历史消息和话题回复读取后统一按此格式解析。 */
 const EventSchema = z.object({ message_id: z.string(), chat_id: z.string(), chat_type: z.enum(['p2p', 'group']),
   sender_id: z.string(), sender_type: z.enum(['user', 'bot']), content: z.string(), create_time: z.string(),
   mentions: z.array(z.object({ id: z.string(), key: z.string().optional(), name: z.string().optional() })).default([]),

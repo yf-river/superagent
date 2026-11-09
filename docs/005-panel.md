@@ -1,6 +1,22 @@
 # 005 Panel
 
-Open **Superagent** in the DeepSeek Harness Web sidebar to supervise the agent. The panel prioritizes work that needs a person, then system health and history. This document builds on [000 Philosophy](000-philosophy.md) through [004 Prompts](004-prompts.md).
+Open **Tasks** in the DeepSeek Harness Web sidebar. The default page is the local task board; **Settings and diagnostics** opens the retained supervision pages described below. The panel prioritizes work that needs a person, then system health and history. This document builds on [000 Philosophy](000-philosophy.md) through [004 Prompts](004-prompts.md).
+
+## Task board
+
+The compact toolbar switches between All, Needs attention and Awaiting review. Filters select directory, priority and status; Display controls visible columns, summaries and priority quadrants. The board uses fixed-width columns with independent scrolling, while the list uses compact rows. Columns are Backlog, Queued, In progress, Needs attention, Awaiting review and Completed; Cancelled is a filter. Each column loads its own pages, so one busy stage does not hide tasks in another. The narrow layout stacks columns vertically.
+
+Create a task with a title, request, server directory, optional images/files, priority and due date. Saving creates only a draft. Priority uses four importance/urgency quadrants in Backlog; tasks without a priority have a separate group. Counts cover all matching tasks, including unloaded pages. Priority and date may be changed during execution without sending new model input or changing queue scheduling. Dates are stored as calendar dates and compared with the viewer's local day for overdue display.
+
+Task UI uses the deployed Multica task surface as its reference: 280px columns, a horizontally scrollable board, independent vertical column scrolling, blank-area mouse panning and dnd-kit card dragging. Detail occupies the content area with a separate property sidebar. View offsets survive detail navigation and refresh. Base UI menus and dialogs share an owned overlay container; scoped Tailwind styles and embedded Inter fonts do not change the DSH shell. The editor saves Markdown through the existing task API. Copied primitives, tokens and pointer panning come from Multica source snapshot `a1a958e562d55d3b7905a9f834b8b453daa5a7ee`; rendered acceptance uses its deployed `working-20261030T194522` frontend, reused from `insights-20261030T193945`. `pnpm build` generates the scoped CSS and rejects unexpected browser runtime dependencies. Business controls for members, accounts and external agents are excluded.
+
+The task detail separates request, results and activity from its property sidebar. It starts work, appends requirements, retries a failure, requests cancellation, accepts a result or reopens a task. Drafts can be edited; requirements after start append rather than overwrite. Project and execution paths are shown separately, alongside the selected strategy, branch and base commit when available.
+
+Opening a card exposes the task commands as a pointer and keyboard alternative to dragging. Stage drops support Backlog to Queued, Awaiting review to Completed, Completed/Cancelled to Backlog, and cancellation. They call the same validated commands as task detail. Other transitions are refused; a running task cannot be marked completed by dragging. Within one stage, dropping into a priority group changes its priority. A move that changes both stage and priority is refused, so neither action is applied partially.
+
+The expandable Routing record reads each execution round's stored Decision and Ticket: requested strategy, chosen directory mode, reason, decision id and ticket id. Open Router session navigates to the original DSH Session with the model's tool calls; the panel does not synthesize a model explanation.
+
+Worker questions/results are shown before secondary history. **Open execution session** navigates to the native DSH conversation; **Source conversation** returns to the chat that saved the task. Attachment downloads use the active Connection. Acceptance records a human decision and starts no Git operation. Further work or integration is requested through the follow-up form. A result remains Awaiting review until accepted.
 
 ## Three questions
 

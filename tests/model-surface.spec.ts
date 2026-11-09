@@ -123,7 +123,7 @@ async function start() {
     const deliver = (queue: UserMessage[]) => (message: UserMessage) => {
       queue.push(message); record(message); agents.get(sessionId)!.status = 'running'
     }
-    const session = { id: sessionId, snapshotEvents: () => [], requestHeader: () => undefined, append: () => {} }
+    const session = { id: sessionId, header: {id:sessionId}, snapshotEvents: () => [], requestHeader: () => undefined, append: () => {} }
     agents.set(sessionId, { id: sessionId, ctx: agentCtx, inbox, followup: deliver(inbox.nextTurn), steer: deliver(inbox.nextStep),
       inject: record, status: 'idle', cancel: () => {}, whenIdle: async () => {}, session } as never)
   }
@@ -135,6 +135,7 @@ async function start() {
     sessionController: { create, resolveAgent, selectModel: async () => {}, rename: async () => {}, inspect: async () => ({ events: [] }) },
     sessionPersistence: { flush: async () => {}, open: async () => history }, permissionPresets: { set: () => {} }, subprocess,
     webServer: { host: '127.0.0.1', port: 3082, register: () => () => {} } }
+  Object.assign(agents,{list:()=>[...agents.values()]})
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
   const seed = new Store(join(directory, 'orchestrator.sqlite'))
   const github = { enabled: true, config: { repository: 'acme/widgets', cli: AGENT } }
