@@ -34,14 +34,14 @@ it('answers each kind of failure with its own status', async () => {
       saves.push(args)
       if (args[1] === 'stale') throw new SettingsConflict('Settings changed. Reload before saving.')
       if (args[1] === 'invalid') z.object({ maxWorkers: z.number() }).parse({})
-      if (args[1] === 'refused') throw new SetupError('agentCliUnset')
+      if (args[1] === 'refused') throw new SetupError('environmentFailed')
       if (args[1] === 'broken') throw new Error('disk full')
       return { saved: true, revision: 1, restarting: false }
     } },
   })
   expect(await call('PUT', 'settings/executor', { value: 'stale', revision: 0 })).toMatchObject({ status: 409 })
   expect(await call('PUT', 'settings/executor', { value: 'invalid', revision: 0 })).toMatchObject({ status: 400, body: { issues: [{ path: 'maxWorkers' }] } })
-  expect(await call('PUT', 'settings/source:github', { value: 'refused', revision: 0 })).toMatchObject({ status: 400, body: { setup: { code: 'agentCliUnset', place: 'github' } } })
+  expect(await call('PUT', 'settings/source:github', { value: 'refused', revision: 0 })).toMatchObject({ status: 400, body: { setup: { code: 'environmentFailed', place: 'deployment' } } })
   expect(await call('PUT', 'settings/executor', { value: 'broken', revision: 0 })).toEqual({ status: 500, body: { error: 'disk full' } })
   // Block names are validated before calling settings.save: reject unknown blocks or non-existent Sources.
   expect(await call('PUT', 'settings/pause', { value: {}, revision: 0 })).toMatchObject({ status: 400 })
@@ -57,7 +57,6 @@ it('decodes path parameters and parses each route\'s query', async () => {
   const call = serve({
     store: { settings: () => SettingsSchema.parse({}),
       read: { decisions: (filter: unknown, offset: number, limit: number) => { seen.push({ filter, offset, limit }); return { items: [], more: false } } } },
-    links: () => () => ({ url: '', label: { zh: '', en: '' } }),
     engine: { unsubscribe: (key: string) => { seen.push(key); return true } },
     sessions: { delivery: async () => 'injected' },
   })

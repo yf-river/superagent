@@ -14,7 +14,7 @@ export function TicketLine({ ticket, question, onChanged, context }: {
   const status = ticketMark(t, ticket)
   const after = async (request: Promise<unknown>) => { await request; await onChanged?.() }
   const note = question && ticket.note && { ...ticket.note, text: readableMarkers(t, ticket.note.text) }
-  const answer = ticket.reply && ticket.stage === 'person' && ticket.action === 'answer' ? ticket.reply : undefined
+
   return <li className="dt-row dt-link dt-ticket" data-state={question ? status.dot : undefined}>
     <div className="dt-ticket-stage"><StageMark state={status.dot} icon={status.icon} label={status.label} /></div>
     <div className="dt-ticket-body">
@@ -29,8 +29,6 @@ export function TicketLine({ ticket, question, onChanged, context }: {
       </div>
       {/* Always render the actions container so every Ticket row keeps a uniform three-line height. */}
       <div className="dt-ticket-actions">{onChanged && <>
-        {answer && <ActionLink href={answer.url} icon="message">{t('answerIn', { source: valueLabel(t, 'source',
-          answer.source) })}</ActionLink>}
         {ticket.actions.retry && <ConfirmButton variant="outline" icon="refresh" label={t('retry')} title={t('retryTitle')}
           message={t('retryConfirm', { title: ticket.title })}
           onConfirm={() => after(call('POST tickets/:id/retry', { id: ticket.id }))} />}

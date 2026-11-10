@@ -3,7 +3,7 @@ import { LOCAL_ROUTER_PROMPT, LOCAL_WORKER_PROMPT } from './local-prompts.ts'
 import { z } from 'zod'
 import { UserError, key } from '../core/index.ts'
 import { policyVersion, type Settings, type SettingsOrigin } from '../policy.ts'
-import { masterPrompt, workerPrompt, sharedPrompt, guides, mainAdmissionPolicy, handoffPolicy, teamDefaults, sourceSkills, cliNotes } from './context.ts'
+import { masterPrompt, workerPrompt, sharedPrompt, guides, mainAdmissionPolicy, handoffPolicy, teamDefaults, cliNotes } from './context.ts'
 import { environmentLines, type Variable } from './execution-environment.ts'
 import { promptsNotice } from './notices.ts'
 import type { Sessions } from './sessions.ts'
@@ -19,12 +19,11 @@ const TEAM_HEADINGS: Record<TeamSection, string> = { communication: 'Communicati
 export const SKILL_NAME = /^[a-z][a-z0-9-]*$/
 /** Prefix prepended to skill names when registering them in DSH Sessions. */
 export const SKILL_PREFIX = 'dsh-superagent-'
-const SkillNameSchema = z.string().regex(SKILL_NAME).refine(name => !(Object.keys(sourceSkills) as string[]).includes(name),
-  'This name belongs to a built-in skill')
+const SkillNameSchema = z.string().regex(SKILL_NAME)
 /** The built-in parts a team may override, by key: both roles' parts, the Source skills, and the generated parts' templates. */
-const PART_KEYS = ['runtime/shared', 'runtime/orchestrator', 'runtime/worker', 'runtime/subscriptions', 'runtime/replies',
+const PART_KEYS = ['runtime/shared', 'runtime/orchestrator', 'runtime/worker', 'runtime/subscriptions',
   'runtime/dispatch', 'runtime/work', 'runtime/admission', 'runtime/handoff/orchestrator', 'runtime/handoff/worker', 'runtime/environment',
-  'runtime/policy', 'runtime/policy/none', 'runtime/local/orchestrator', 'runtime/local/worker', 'skill/feishu', 'skill/github'] as const
+  'runtime/policy', 'runtime/policy/none', 'runtime/local/orchestrator', 'runtime/local/worker'] as const
 export type PartKey = typeof PART_KEYS[number]
 /** A team's text for a built-in part, and `base`, the key of the built-in text it was edited from. */
 const OverrideSchema = z.object({ text: z.string(),
@@ -59,7 +58,6 @@ export const builtInParts = (): Readonly<Record<PartKey, BuiltInPart>> => parts 
   'runtime/shared': { roles: BOTH, text: sharedPrompt }, 'runtime/orchestrator': { roles: MAIN, text: masterPrompt },
   'runtime/worker': { roles: WORKER, text: workerPrompt },
   'runtime/subscriptions': { roles: BOTH, text: `## subscriptions\n${guides.subscriptions}` },
-  'runtime/replies': { roles: BOTH, text: `## replies\n${guides.replies}` },
   'runtime/dispatch': { roles: MAIN, text: `## dispatch\n${guides.dispatch}` }, 'runtime/work': { roles: WORKER, text: `## work\n${guides.work}` },
   'runtime/admission': { roles: MAIN, text: mainAdmissionPolicy },
   'runtime/handoff/orchestrator': { roles: MAIN, text: handoffPolicy('orchestrator') },
@@ -68,8 +66,6 @@ export const builtInParts = (): Readonly<Record<PartKey, BuiltInPart>> => parts 
   'runtime/policy': { roles: MAIN, text: `${POLICY_HEAD} The enabled rules, by name and id:\n{rules}`, placeholders: ['{version}', '{mode}', '{rules}'] },
   'runtime/policy/none': { roles: MAIN, text: `${POLICY_HEAD} No rule is enabled: a proactive candidate can only be ignored.`,
     placeholders: ['{version}', '{mode}'] },
-  'skill/feishu': { roles: BOTH, text: `${sourceSkills.feishu}\n\n## CLI usage\n${cliNotes}` },
-  'skill/github': { roles: BOTH, text: `${sourceSkills.github}\n\n## CLI usage\n${cliNotes}` },
 }
 /** The key of a built-in text, which an override's `base` records. */
 export const builtInBase = (text: string): string => key('prompt-built-in', text)
@@ -110,7 +106,7 @@ export function promptParts(config: PromptConfig, role: Role, environment?: stri
   return [
     fixed('runtime/shared'), fixed(`runtime/${role}`),
     ...TEAM_SECTIONS.map(team),
-    ...['subscriptions', 'replies', role === 'orchestrator' ? 'dispatch' : 'work'].map(name => fixed(`runtime/${name}`)),
+    ...['subscriptions', role === 'orchestrator' ? 'dispatch' : 'work'].map(name => fixed(`runtime/${name}`)),
     ...role === 'orchestrator' ? [fixed('runtime/admission')] : [],
     fixed('runtime/handoff', `runtime/handoff/${role}`),
     ...environment ? [{ name: 'runtime/environment', kind: 'generated' as const, key: 'runtime/environment', text: environment }] : [],
@@ -121,7 +117,7 @@ export function composePrompt(config: PromptConfig, role: Role, environment?: st
   return promptParts(config, role, environment, policy).map(part => part.text).join('\n\n')
 }
 export function composeSkill(config: PromptConfig, name: string): string {
-  return name === 'feishu' || name === 'github' ? builtIn(config, `skill/${name}`) : config.skills[name] ?? ''
+  return config.skills[name] ?? ''
 }
 
 /** An override whose built-in text changed since its `base`, with that text when kept, or whose part this version no longer has. */
@@ -148,7 +144,7 @@ export class Prompts {
   }
   /** Returns skills to register in every Session: built-in Source skills (`feishu` only when a Feishu bot is configured) followed by team skills. */
   skills(config: PromptConfig): [string, string][] {
-    return [...this.localMode() ? [] : [...this.feishu() ? ['feishu'] : [], 'github'], ...Object.keys(config.skills)].map(name => [name, composeSkill(config, name)])
+    return Object.keys(config.skills).map(name => [name, composeSkill(config, name)])
   }
   current(): PromptVersion {
     const revision = this.versions.revision()

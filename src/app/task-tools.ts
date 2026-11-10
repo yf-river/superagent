@@ -5,13 +5,16 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { key, type Trigger } from '../core/index.ts'
-import { TaskPrioritySchema, type Tasks } from './tasks.ts'
+import { type Tasks } from './tasks.ts'
 import { ticketOfSession } from '../executor/dsh.ts'
 
 /** 将任务附件作为原生内容投递，文件路径由 DSH 请求投影解析。 */
 export function taskContent(tasks: Tasks, trigger: Trigger | undefined): ContentBlock[] {
   if(trigger?.source!=='local') return []
   const ids=z.array(z.string()).parse(trigger.meta.assets ?? [])
+  return taskAssetsContent(tasks, ids)
+}
+export function taskAssetsContent(tasks: Tasks, ids: readonly string[]): ContentBlock[] {
   return ids.map(id=>tasks.asset(id)).map(asset=>asset.kind==='image' ? {type:'image',attachment:asset.ref} : {type:'file',attachment:asset.ref})
 }
 const uuidOf=(value:string)=>{const h=key(value);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20)}`}
@@ -28,7 +31,7 @@ export function installTaskTools(ctx: Context, tasks: Tasks, masterId: string): 
     }
     add('superagent_task_create','Save a task to the task board as a draft; does not start execution. Use only the request the user wants saved. Return the task id. attachmentNames selects files/images by name from the most recent user message.',
       z.object({title:z.string().min(1).max(200),description:z.string().min(1).max(100000),directory:z.string().optional(),
-        strategy:z.enum(['auto','shared','worktree']).default('auto'),priority:TaskPrioritySchema.default('none'),dueDate:z.iso.date().nullable().default(null),attachmentNames:z.array(z.string()).default([])}).strict(),async(args,callId)=>{
+        strategy:z.enum(['auto','shared','worktree']).default('auto'),attachmentNames:z.array(z.string()).default([])}).strict(),async(args,callId)=>{
         const assets:string[]=[]
         const message=agent.session.snapshotEvents().filter(event=>event.type==='user/message' && event.data.source.kind==='user').at(-1)
         if(args.attachmentNames.length) {
@@ -43,7 +46,7 @@ export function installTaskTools(ctx: Context, tasks: Tasks, masterId: string): 
           }
         }
         const task=await tasks.create({requestId:uuidOf(`${agent.id}:${callId}`),title:args.title,description:args.description,
-          directory:args.directory ?? agent.session.header.cwd ?? '',strategy:args.strategy,priority:args.priority,dueDate:args.dueDate,assets},agent.id)
+          directory:args.directory ?? agent.session.header.cwd ?? '',strategy:args.strategy,assets},agent.id)
         return {task_id:task.id,title:task.title,stage:task.stage,directory:task.directory,url:`#superagent/tasks/${task.id}`}
       })
     add('superagent_task_list','Find tasks on this DSH instance task board. Does not start or change tasks.',

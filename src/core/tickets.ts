@@ -2,14 +2,12 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
-import type { Assignment, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
+import type { Assignment, Evaluation, Follow, Mandate, PolicyEffect, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
   Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
-import type { Replies } from './replies.ts'
 import { canRetry } from './stage.ts'
 
-const sameChannel = (a: ChannelRef, b: ChannelRef): boolean => JSON.stringify(a) === JSON.stringify(b)
 /** Whether an Input is a message no person wrote, such as CI's, a bot's, or the main Session's note. */
 export const automatic = (input: TicketInput | undefined): boolean => input?.kind === 'note' || (input?.kind === 'trigger' && !input.human)
 /**
@@ -23,15 +21,15 @@ const STATUS_REQUEST = 'Report the current ticket status with orchestrator_repor
 /**
  * Manages each ticket's lifecycle: creates the ticket for an accept decision with its Mandate, Subscriptions, and first
  * Assignment, binds and attaches Threads, adds Inputs, resumes, retries, restarts, and ends tickets, and drops Subscriptions.
- * Coordinates with Replies for the acknowledgement an accept carries and with Executor to start, deliver to, and stop assignments.
+ * Coordinates with Executor to start, deliver to, and stop assignments.
  * Intake, Evals, Assignments, and Engine delegate ticket and subscription mutations here.
  */
 export class Tickets extends EnginePart {
-  constructor(options: EngineOptions, private readonly replies: Replies) { super(options) }
+  constructor(options: EngineOptions) { super(options) }
 
   /**
-   * Create the ticket an accept decided, under `mandate`, with the Channels and Threads of the Eval's Triggers, its first
-   * Assignment, and the acknowledgement the accept carries, and queue its launch. Its origin is the admissible Trigger that
+   * Create the ticket an accept decided, under `mandate`, with the Threads of the Eval's Triggers, its first
+   * Assignment, and queue its launch. Its origin is the admissible Trigger that
    * gave the Eval its strength, or the Eval's last Trigger for an Eval recorded before `primary` existed.
    */
   create(id: string, decisionId: string, mandate: Mandate, evaluation: Pick<Evaluation, 'triggerIds' | 'primary'>,
@@ -40,17 +38,13 @@ export class Tickets extends EnginePart {
     // Fall back to the last trigger for Evals recorded before `primary` existed.
     const primary = this.repo.triggers.get(evaluation.primary ?? triggerIds.at(-1)!)
     const origin = { triggerId: primary?.id ?? triggerIds[0]!, triggerIds }
-    let ticket: Ticket = { id, title: outcome.title, decisionId, mandate, channels: [], assignments: [], inputs: [], undelivered: [],
+    let ticket: Ticket = { id, title: outcome.title, decisionId, mandate, assignments: [], inputs: [], undelivered: [],
       createdAt: at, updatedAt: at, origin }
-    for (const triggerId of triggerIds) {
-      const channel = this.repo.triggers.get(triggerId)?.channel
-      if (channel && !ticket.channels.some(item => sameChannel(item, channel))) ticket.channels.push(channel)
-    }
+
     ticket = this.options.prepareTicket?.(ticket, outcome) ?? ticket
     const assignment = this.newAssignment(ticket)
     this.repo.tickets.save(ticket)
     for (const triggerId of triggerIds) for (const ref of this.repo.triggers.get(triggerId)?.threads ?? []) this.subscribe(id, ref)
-    if (outcome.acknowledgement && primary) this.replies.acknowledgeAccepted(id, primary, outcome.acknowledgement)
     this.options.executor.start(this.require(id), assignment)
     this.emit('ticket.created', { ticketId: id, decisionId, strength: mandate.strength })
   }
@@ -274,12 +268,11 @@ export class Tickets extends EnginePart {
       ? this.repo.triggers.get(input.triggerId) ?? [] : [])
   }
   /**
-   * Whether a ticket's worker took a person's message up, by acknowledging or answering it. A message acknowledged before
-   * acknowledgements were recorded on it has only the acknowledgement's message in the outbox.
+   * Whether a ticket's worker took a person's message up, by acknowledging or answering it. The disposition records which ticket processed it.
    */
   private takenUp(ticket: Ticket, trigger: Trigger): boolean {
     const acked = this.repo.triggers.disposition(trigger.id)?.acked
-    return acked ? acked.includes(ticket.id) : this.options.outbox.status(key('ack', trigger.id)) !== undefined
+    return acked?.includes(ticket.id) ?? false
   }
   /** The person's messages among a ticket's Inputs `ids` that it decides and its worker did not take up. */
   private untaken(ticket: Ticket, ids: readonly string[]): Trigger[] {

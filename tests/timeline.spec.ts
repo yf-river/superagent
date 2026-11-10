@@ -3,12 +3,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { Engine, type ChannelRef, type Trigger } from '../src/core/index.ts'
+import { Engine, type Trigger } from '../src/core/index.ts'
 import { Store } from '../src/app/store.ts'
 import { threadDetail } from '../src/app/views/threads.ts'
 import { SettingsSchema, settingsPolicy } from '../src/policy.ts'
-import { githubKind } from '../src/sources/github.ts'
-import { githubLink } from '../src/sources/github-channel.ts'
+import { githubKind } from './fixtures/sources.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 
 let directory: string
@@ -20,10 +19,10 @@ beforeEach(() => {
 afterEach(() => { store.close(); rmSync(directory, { recursive: true, force: true }) })
 const sources = new SourceRegistry(() => SettingsSchema.parse({}))
 sources.register(githubKind)
-const host = () => ({ store, sources, links: (channel: ChannelRef) => githubLink(channel.address, {}) })
+const host = () => ({ store, sources })
 const engine = () => new Engine({ repo: store, scope: sources, policy: () => settingsPolicy(SettingsSchema.parse({}), sources),
   assessor: { request: () => {} }, executor: { start: async () => {}, deliver: async () => {}, stop: async () => {} },
-  outbox: { send: () => {}, status: () => undefined, withdraw: () => {} } })
+  })
 const comment = (id: string, at: string): Trigger => ({ id, source: 'github', threads: [{ source: 'github', id: '7' }], actor: { source: 'github', id: 'alice' },
   human: true, at, text: `comment ${id}`, meta: {} })
 const saveThread = () => store.threads.save({ key: 'github:7', ref: { source: 'github', id: '7' }, createdAt: '', subscriptions: [], correlated: [], pending: [],

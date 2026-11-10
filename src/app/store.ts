@@ -1,24 +1,17 @@
-/** SQLite persistence for domain aggregates, key-value state, settings history, and the channel outbox. */
+/** SQLite persistence for domain aggregates, key-value state, settings history, and local task records. */
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { key, threadKey, type ChannelRef, type Decision, type OutboundMessage, type ReplyStatus, type Repositories, type Thread, type ThreadFact,
+import { key, threadKey, type Decision, type Repositories, type Thread, type ThreadFact,
   type ThreadFacts, type Ticket, type Trigger, type TriggerDisposition } from '../core/index.ts'
 import { KV, type Family, type Key } from '../kv.ts'
 import { SettingsSchema, type Settings, type SettingsOrigin, type SettingsSave } from '../policy.ts'
-import { OLDEST_SCHEMA, SCHEMA_VERSION, migrateTo11, tooOld } from './migration.ts'
+import { OLDEST_SCHEMA, SCHEMA_VERSION, migrateTo13, tooOld } from './migration.ts'
 import { Versions } from './versions.ts'
 import { storeReads } from './store-read.ts'
 
 /** A Trigger's position on its thread timeline, ordered by timestamp and then `id` as tie-breaker. */
 export interface TimelinePlace { at: string; id: string }
-/** Why a message was dropped: its conversation can never receive it (`channelGone`), or its Source no longer listens to it (`channelIgnored`). */
-export type DropReason = 'channelGone' | 'channelIgnored'
-/** Outbound message receipt tracked in the outbox from the moment it is queued (`pending`, `sent`, or `dropped`); delivery attempt counts live on its `reply` effect. */
-export interface Receipt extends OutboundMessage { status: ReplyStatus; dropped?: { at: string; reason: DropReason } }
-/** A dropped outbound message receipt, with the timestamp and reason it was dropped. */
-export type Dropped = Receipt & { dropped: { at: string; reason: DropReason } }
-/** Saved settings snapshot with the policy version and ticket notifications it produced (`internal` saves have no origin). */
 export interface SettingsVersion {
   revision: number; savedAt: string; source: SettingsOrigin | 'internal'; block?: SettingsSave
   policyVersion: string; policyChanged: boolean; notified: string[]; settings: Settings
@@ -38,22 +31,20 @@ const SETS: Record<string, Record<string, string>> = {
     active: "INTEGER AS (CASE WHEN json_array_length(value, '$.pending') > 0 OR value -> '$.evaluating' IS NOT NULL THEN 1 END)",
     subscribed: "TEXT AS (CASE WHEN json_array_length(value, '$.subscriptions') > 0 THEN value ->> '$.ref.source' END)",
   },
-  // Composite key (ticketId + thread) used to preserve per-conversation reply order.
-  outbox: { dropped: "TEXT AS (value ->> '$.dropped.at')", pending: `TEXT AS (CASE WHEN value ->> '$.status' = 'pending'
-    AND value ->> '$.ticketId' IS NOT NULL THEN (value ->> '$.ticketId') || ' ' || (value ->> '$.channel.thread') END)` },
+
 }
 export { SCHEMA_VERSION }
 /**
- * SQLite backing store implementing domain `Repositories`, view read queries, versioned settings, outbox receipts, and key-value state.
+ * SQLite backing store implementing domain `Repositories`, view read queries, versioned settings, local tasks, and key-value state.
  * The Runtime opens it after locking the state directory and automatically migrates supported older schemas on startup.
- * The Engine mutates domain aggregates inside `atomic` transactions while Sources, views, and the Outbox read state or update their own records.
+ * The Engine mutates domain aggregates inside `atomic` transactions while Sources and views read state or update their own records.
  */
 export class Store implements Repositories {
   readonly db: DatabaseSync
   /**
    * Opens or creates the SQLite database at `path`, migrating supported older records and adding the task tables in one transaction.
    * @param report - Receives errors thrown by `afterCommit` callbacks without failing the committed transaction.
-   * @throws When the database schema is older than `OLDEST_SCHEMA` (10), newer than `SCHEMA_VERSION` (12), or when migration fails; in every case the database file is left unchanged and the SQLite handle is closed so a later attempt in the same process can open it.
+   * @throws When the database schema is older than `OLDEST_SCHEMA` (12), newer than `SCHEMA_VERSION` (13), or when migration fails; in every case the database file is left unchanged and the SQLite handle is closed so a later attempt in the same process can open it.
    */
   constructor(path: string, private readonly report: (error: unknown) => void = () => {}) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
@@ -78,7 +69,6 @@ export class Store implements Repositories {
             CREATE TABLE IF NOT EXISTS thread (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS ticket (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS decision (id TEXT PRIMARY KEY, thread TEXT NOT NULL, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS trigger_thread (thread TEXT NOT NULL, id TEXT NOT NULL, at TEXT NOT NULL, human INTEGER NOT NULL,
               PRIMARY KEY (thread, id));
             CREATE TABLE IF NOT EXISTS effect (kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, seq INTEGER NOT NULL,
@@ -90,7 +80,8 @@ export class Store implements Repositories {
             CREATE INDEX IF NOT EXISTS effect_due ON effect(kind, due, seq);
           `)
           this.addColumns()
-          if (version === 10) migrateTo11(this)
+          if (version !== undefined && version < SCHEMA_VERSION) migrateTo13(this)
+          this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS task_session ON task(json_extract(value,'$.sessionId')) WHERE json_extract(value,'$.sessionId') IS NOT NULL")
           if (version !== SCHEMA_VERSION) this.set(KV.store.schema, SCHEMA_VERSION)
         })
       } catch (error) {
@@ -252,44 +243,5 @@ export class Store implements Repositories {
   /** Read-only queries for management views, orchestrator tools, and source polling (see `storeReads`). */
   readonly read: ReturnType<typeof storeReads>
 
-  /** Delivery status of a queued message; receipts are retained permanently so message IDs are idempotent. */
-  replyStatus(id: string): ReplyStatus | undefined { return this.receipts.get(id)?.status }
-  /** Outbox message receipts for channel delivery; only `Outbox` writes to `receipts`. */
-  readonly receipts = {
-    get: (id: string): Receipt | undefined => this.values<Receipt>('SELECT value FROM outbox WHERE id = ?', id)[0],
-    /** Pending message receipts, oldest first. */
-    waiting: (): Receipt[] => this.values("SELECT value FROM outbox WHERE value ->> '$.status' = 'pending' ORDER BY rowid"),
-    /** True if an earlier message for the same ticket and conversation is still pending with fewer than `failures` consecutive failed `reply` effect attempts. */
-    behind: (id: string, failures: number): boolean => !!this.db.prepare(`SELECT 1 FROM outbox earlier
-      JOIN outbox message ON message.id = ? LEFT JOIN effect ON effect.kind = 'reply' AND effect.key = earlier.id
-      WHERE earlier.pending = message.pending AND earlier.rowid < message.rowid AND IFNULL(effect.attempts, 0) < ? LIMIT 1`).get(id, failures),
-    /**
-     * Records a new pending message receipt; an already-recorded message ID keeps its original receipt.
-     * @returns Whether the message ID was newly recorded.
-     */
-    add: (message: OutboundMessage): boolean => {
-      const receipt: Receipt = { ...message, status: 'pending' }
-      return Number(this.db.prepare('INSERT OR IGNORE INTO outbox (id, value) VALUES (?, ?)').run(message.id, JSON.stringify(receipt)).changes) > 0
-    },
-    /**
-     * Marks a pending receipt as sent or dropped (with drop reason and timestamp), recreating the receipt if the message
-     * was withdrawn while being sent so its ID cannot be queued again.
-     */
-    settle: (message: OutboundMessage, outcome: 'sent' | DropReason): void => {
-      const settled = outcome === 'sent' ? { status: 'sent' } : { status: 'dropped', dropped: { at: new Date().toISOString(), reason: outcome } }
-      const { id, channel, text, kind, ticketId } = message
-      const updated = this.db.prepare("UPDATE outbox SET value = json_patch(value, ?) WHERE id = ? AND value ->> '$.status' = 'pending'")
-        .run(JSON.stringify(settled), id)
-      if (!Number(updated.changes)) this.db.prepare('INSERT OR IGNORE INTO outbox (id, value) VALUES (?, ?)')
-        .run(id, JSON.stringify({ id, channel, text, kind, ...ticketId ? { ticketId } : {}, ...settled }))
-    },
-    /**
-     * Withdraws a pending message that has not yet been sent.
-     * @returns Whether a pending message with `id` was waiting and removed.
-     */
-    withdraw: (id: string): boolean =>
-      Number(this.db.prepare("DELETE FROM outbox WHERE id = ? AND value ->> '$.status' = 'pending'").run(id).changes) > 0,
-  }
 }
 export { key, threadKey }
-export type { ChannelRef }

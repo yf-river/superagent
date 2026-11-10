@@ -1,20 +1,18 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { ChannelRef, Decision, PolicyEffect, ThreadRef, Ticket, Trigger } from './model.ts'
+import type { Decision, PolicyEffect, ThreadRef, Ticket, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import { Assignments, type WorkerReport } from './assignments.ts'
 import { Evals, type Outcome } from './evals.ts'
 import { Intake, type ReceiveResult } from './intake.ts'
-import { Replies, type Reply, type ReplyRequest } from './replies.ts'
 import { Tickets } from './tickets.ts'
 
 export type { EngineOptions } from './part.ts'
 export type { WorkerReport } from './assignments.ts'
 export type { Outcome } from './evals.ts'
 export type { ReceiveResult } from './intake.ts'
-export type { Reply, ReplyRequest } from './replies.ts'
 
 /**
  * Single transactional entry point for mutating Triggers, Threads, Decisions, Tickets, and Assignments.
@@ -23,16 +21,14 @@ export type { Reply, ReplyRequest } from './replies.ts'
  */
 export class Engine {
   private readonly repo: Repositories
-  private readonly replies: Replies
   private readonly tickets: Tickets
   private readonly assignments: Assignments
   private readonly evals: Evals
   private readonly intake: Intake
   constructor(private readonly options: EngineOptions) {
     this.repo = options.repo
-    this.replies = new Replies(options)
-    this.tickets = new Tickets(options, this.replies)
-    this.assignments = new Assignments(options, this.tickets, this.replies)
+    this.tickets = new Tickets(options)
+    this.assignments = new Assignments(options, this.tickets)
     this.evals = new Evals(options, this.tickets)
     this.intake = new Intake(options, this.tickets)
   }
@@ -125,15 +121,6 @@ export class Engine {
    * @throws UserError when the ticket is unknown.
    */
   requestStatus(ticketId: string): boolean { return this.repo.atomic(() => this.tickets.requestStatus(ticketId)) }
-  /**
-   * Queue a message for the Channel its purpose names: an acknowledgement or an answer goes where the person's message was
-   * written, attention where the message that raised the question was, else, like a result, to the conversation the ticket
-   * started in. A message queued before is not queued again (see `Replies.reply`).
-   * @throws UserError when the ticket or trigger is unknown or the purpose's rule refuses it, such as a result of a ticket that
-   * is not ready, completed, merged, or dropped.
-   */
-  reply(request: ReplyRequest): Reply { return this.repo.atomic(() => this.replies.reply(request)) }
-
   // People, through the panel or the main Session
 
   /** The assessor delivered an Eval's candidate to its Session: the Eval's deadline counts from now. */
@@ -229,8 +216,7 @@ export class Engine {
   }
   /**
    * Record a report on an open ticket's current Assignment. Its question for a person (`attention`) is asked, kept, or
-   * cleared (`null` or a `ready` report), and a replaced attention question whose reply has not been sent yet is withdrawn
-   * from the outbox. A `blocked` or `failed` report holds back automated inputs until a human message arrives. A `dropped`
+   * cleared (`null` or a `ready` report). A `blocked` or `failed` report holds back automated inputs until a human message arrives. A `dropped`
    * report ends the ticket, and a `ready` report ends it: `completed` without followed Threads, else with the `followsDone`
    * outcome once `followsDone` holds.
    * @throws UserError for an unknown or ended ticket, an ended assignment, a question that comes with a ready result or an
@@ -260,11 +246,11 @@ export class Engine {
 /** What Sources ask and tell the Engine. */
 export type EngineForSources = Pick<Engine, 'receive' | 'bindThread' | 'threadClosed'>
 /** What the main Session asks of the Engine. */
-export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
+export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'requestStatus' | 'note'>
 /** What people ask of the Engine, through the panel or the main Session. */
 export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
 /** What Settings tells the Engine. */
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
-  | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'>
+  | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext'>

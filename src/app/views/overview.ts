@@ -47,9 +47,7 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
   const sourceParts = new Set(instances.flatMap(instance => sources.kind(instance.kind)?.health ?? []))
   const problems = [
     ...(setup ? [{ kind: 'setup' as const, ...setup }] : []),
-    ...(running.length ? [] : [{ kind: 'no-source' as const }]),
     // Only allowed senders can originate work, so empty allowlists mean no request can ever become a ticket.
-    ...(anyoneAllowed(settings) ? [] : [{ kind: 'no-allowed' as const }]),
     ...running.flatMap(source => source.health.filter(item => item.state === 'error').map(item => ({ kind: 'source-error' as const, source: { id: source.id, title: source.title, health: item } }))),
     ...(settings.paused ? [{ kind: 'executor-paused' as const }] : []),
     // Unavailable Evals behind the `evals` health entry are listed individually as `eval-unavailable` below.
@@ -60,9 +58,7 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
       .map(thread => ({ kind: 'eval-overdue' as const, thread: threadSummary(view, thread) })),
     ...unjudged(store, since).map(({ thread, decision }) => ({ kind: 'eval-unavailable' as const, decisionId: decision.id,
       thread: threadSummary(view, thread), reason: decision.reason, triggerId: decision.triggerIds[0] ?? '' })),
-    ...store.read.failingReplies().map(item => ({ kind: 'outgoing' as const, outgoing: { id: item.id, channel: item.channel,
-      text: preview(item.text),
-      attempts: item.attempts, error: item.error } })),
+
   ]
   const open = store.tickets.open().sort(newestFirst)
   const stats = Object.values(store.read.triggerStats(since))
@@ -73,7 +69,7 @@ export function overview(host: ViewHost, health: HealthMap, policyVersionValue: 
     person: open.filter(ticket => ticketStage(ticket).stage === 'person').map(ticket => ticketRow(view, ticket)),
     executor: { ...load, maxWorkers: settings.executor.maxWorkers, idle: open.filter(ticket => ticketStage(ticket).stage === 'idle').length },
     flow: { received, filtered, triggers: received - filtered, judged: judgement.judged, accepted: judgement.accepted,
-      evaluating: evaluating.length, dropped: store.read.droppedSince(since) },
+      evaluating: evaluating.length },
     policyVersion: policyVersionValue,
   }
 }

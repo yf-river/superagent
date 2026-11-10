@@ -24,14 +24,9 @@ function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () =
   const raw = (text: string | undefined) => text && <p className="dt-error dt-clamp dt-mono">{text}</p>
   const worded = (text: string) => <p className="dt-error">{text}</p>
   switch (problem.kind) {
-    // A failed Feishu bot check pauses only the Feishu Source; other setup problems halt the entire service.
-    case 'setup': return row(t(problem.place === 'feishu' ? 'problemSetupFeishu' : 'problemSetup'), <p className="dt-error"><SetupMessage
+    case 'setup': return row(t('problemSetup'), <p className="dt-error"><SetupMessage
       problem={problem} /></p>,
       setupPage(problem.place), t(`problemSetupFix.${problem.place}`), <CheckSetupButton />)
-    case 'no-source': return row(t('problemNoSource'), undefined, settingsRoute('source'), undefined, go(t('actionOpenSources'),
-      settingsRoute('source')))
-    case 'no-allowed': return row(t('problemNoAllowed'), undefined, settingsRoute('eval'), undefined, go(t('actionAddAllowed'),
-      settingsRoute('eval')))
     case 'executor-paused': return row(t('problemPaused'), undefined, { page: 'execution' }, undefined,
       <ConfirmButton variant="outline" icon="play" label={t('resumeProcessing')} title={t('resumeProcessing')}
         message={t('resumeProcessingConfirm')}
@@ -40,7 +35,7 @@ function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () =
     case 'source-error': {
       const health = problem.source.health
       return row(t('sourceError', { source: localized(t, problem.source.title) }), health.code ? worded(healthText(t, health))
-        : raw(health.detail), { page: 'source' }, t('sourceErrorHint'))
+        : raw(health.detail), { page: 'settings', query: { group: 'eval' } }, t('sourceErrorHint'))
     }
     case 'eval-overdue': return row(t('problemEvalOverdue', { thread: readableMarkers(t, problem.thread.title) }), undefined, { page: 'trigger',
       id: problem.thread.key })
@@ -52,9 +47,7 @@ function ProblemLine({ problem, onChanged }: { problem: Problem; onChanged: () =
         <Button variant="outline" size="sm" icon={<Icon name="dismiss" size={14} />} disabled={post.busy}
           onClick={() => { void post.run(() => call('POST decisions/:id/dismiss', { id: problem.decisionId })) }}>{t('dismiss')}</Button>
       </>)
-    case 'outgoing': return row(t('problemReply', { source: valueLabel(t, 'source', problem.outgoing.channel.source),
-      attempts: problem.outgoing.attempts }),
-      raw(problem.outgoing.error), undefined)
+
   }
 }
 
@@ -85,10 +78,9 @@ export function OverviewPage() {
       {/* Received and evaluated counts operate on Triggers rather than Threads or Decisions, so they do not link to filtered views. */}
       <div className="dt-stats">
         {stat(t('flowReceivedLabel'), data.flow.received)}
-        {stat(t('flowFilteredLabel'), data.flow.filtered, data.flow.filtered ? { page: 'source' } : undefined)}
+        {stat(t('flowFilteredLabel'), data.flow.filtered, data.flow.filtered ? { page: 'settings', query: { group: 'eval' } } : undefined)}
         {stat(t('flowJudgedLabel'), data.flow.judged)}
         {stat(t('flowAcceptedLabel'), data.flow.accepted, { page: 'eval', query: { window: '24h' } })}
-        {data.flow.dropped > 0 && stat(t('flowDroppedLabel'), data.flow.dropped, { page: 'source' })}
       </div>
     </Section>
     <Section title={t('term.executor')} action={more({ page: 'execution' })}>

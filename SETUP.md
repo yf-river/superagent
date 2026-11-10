@@ -27,6 +27,6 @@ dsh plugin --profile web add "link:$PWD"
 
 随后按目标实例的正常方式重启 DSH。不要重新创建或覆盖已有 profile。默认状态目录为当前 `DSH_HOME` 下的 `state/superagent`，无需填写 GitHub、飞书或账号设置。
 
-在侧边栏打开「任务」，通过「设置与诊断 → 设置 → 评估 / 执行」选择可用的 Router 和 Worker 模型；未指定时使用 DSH 的默认模型。保存任务只产生草稿，点击开始才执行。模型或路由失败会进入待处理，修正模型后可重试。
+在侧边栏打开「superagent」，通过「设置与诊断 → 设置 → 评估」选择 Router 模型；任务会话使用 DSH 的模型选择器。保存任务只产生待办；首次打开由 Router 准备目录并创建会话，点击开始才执行。准备失败保留待办并可重试，执行失败进入待处理。
 
 详细运行方式和隔离验证见 [006 Deployment](docs/006-deployment.md)。

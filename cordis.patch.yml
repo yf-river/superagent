@@ -184,3 +184,8 @@
                   thresholdChars: 8192
                   headChars: 4096
                   tailChars: 1024
+
+# 新会话默认使用完全权限；已有会话保留其已记录的权限。
+- id: permission
+  config:
+    defaultPreset: danger-full-access

@@ -46,3 +46,20 @@ it('owns the overlay container and follows the DSH dark theme through unload',as
   expect(document.querySelector('.st-portals')?.classList.contains('dark')).toBe(true)
   view.dispose();expect(document.querySelector('.st-portals')).toBeNull();document.body.removeAttribute('data-ds-dark-theme')
 })
+it('starts the associated task from native conversation controls and keeps an action menu for narrow layouts',async()=>{
+ const {TaskConversation}=await import('../src/client/tasks.tsx'),{zh}=await import('../src/client/locales.ts'),{translator}=await import('./fixtures/panel.tsx')
+ let task={id:'local-task',revision:2,title:'读取文件',description:'只读取',directory:'/project',strategy:'shared',assets:[],phase:'draft',stage:'draft',sessionId:'task-local-task',tickets:[],run:0,events:[],attachments:[],routes:[],retryable:false,waitingForWorker:false,summary:'',createdAt:'',updatedAt:''}
+ const transport=vi.fn(async(path:string,method:string,body?:unknown)=>{
+  if(method==='POST'){expect(path).toBe('tasks/local-task/start');expect(body).toMatchObject({revision:2});task={...task,revision:3,phase:'submitted',stage:'working'}}
+  return new Response(JSON.stringify(task))
+ })
+ const back=vi.fn(),view=mount(<TaskConversation sessionId="task-local-task" t={translator(zh)} transport={transport} back={back}/> )
+ try{
+  await act(async()=>{await new Promise(r=>setTimeout(r,30))})
+  expect(transport).toHaveBeenCalledWith('task-session/task-local-task','GET',undefined)
+  expect(view.container.querySelector('.st-task-menu button')?.textContent).toContain('任务操作')
+  const start=[...view.container.querySelectorAll('.st-task-actions button')].find(b=>b.textContent==='开始执行') as HTMLButtonElement
+  expect(start).toBeDefined();await act(async()=>{start.click();await new Promise(r=>setTimeout(r,30))})
+  expect(view.container.textContent).toContain('进行中');expect(view.container.querySelector('.st-task-actions')?.textContent).not.toContain('开始执行')
+ }finally{view.dispose()}
+})

@@ -1,16 +1,15 @@
-/** Shared view projections for triggers, tickets, threads, decisions, and channel links. */
+/** Shared view projections for triggers, tickets, threads, decisions, and task records. */
 import { z } from 'zod'
-import { canRetry, followupOwners, latestReport, liveTicket, settled, threadKey, ticketStage, type ActorRef, type ChannelRef, type Decision,
+import { canRetry, followupOwners, latestReport, liveTicket, settled, threadKey, ticketStage, type ActorRef, type Decision,
   type DecisionKind, type Thread, type ThreadFacts, type Ticket, type TicketStage, type Trigger } from '../../core/index.ts'
 import { allowedSender, listedBot } from '../../policy.ts'
-import type { ChannelLink, Localized } from '../../sources/kind.ts'
+import type { Localized } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import type { Store } from '../store.ts'
 import { attribute, markdown, plain, preview, readable } from './text.ts'
 
-export type LinkTarget = (channel: ChannelRef) => ChannelLink
-export interface ViewHost { store: Store; sources: SourceRegistry; links: LinkTarget }
+export interface ViewHost { store: Store; sources: SourceRegistry }
 export const page = <T>(items: T[], offset: number, limit: number) => ({ items: items.slice(offset, offset + limit), total: items.length, next_offset: offset + limit < items.length ? offset + limit : null })
 const DAY = 86_400_000
 export const dayAgo = () => new Date(Date.now() - DAY).toISOString()
@@ -125,7 +124,7 @@ export function ticketSummary(ticket: Ticket) {
       assignments: ticket.assignments.length, inputs: ticket.inputs.length, undelivered: ticket.undelivered.length,
     // Every started Assignment of a Ticket runs in its one shared worker Session.
     deliveryError: attribute(ticket.delivery?.error), sessionId: ticket.assignments.some(item => item.startedAt)
-      ? workerSessionId(ticket.id) : '',
+      ? workerSessionId(ticket) : '',
     directory: attribute(ticket.execution?.directory), summary: latestReport(ticket)?.summary ?? '', createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt }
 }
@@ -176,11 +175,6 @@ export function threadSummary(view: Snapshot, thread: Thread) {
     facts: (thread.meta.facts ?? {}) as ThreadFacts }
 }
 export type ThreadSummaryView = ReturnType<typeof threadSummary>
-/** Resolves a channel link, preferring the specific trigger URL when the source link references a trigger. */
-export function channelLink({ store, links }: ViewHost, channel: ChannelRef) {
-  const { url, label, triggerId } = links(channel)
-  return { source: channel.source, url: (triggerId && store.triggers.get(triggerId)?.url) || url, label }
-}
 /** Parses stored assessment audit metadata, tolerating fields omitted or shaped differently by older versions. */
 const AuditSchema = z.object({
   would_accept: z.boolean().optional().catch(undefined),

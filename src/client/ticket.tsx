@@ -124,7 +124,6 @@ export function TicketPage({ id }: { id: string }) {
       t('lang'))
     return reason ? t('endedAt', { time, outcome, reason }) : t('endedAtShort', { time, outcome })
   })()
-  const channel = data.channels[0]
   return <>
     <PageHead title={data.title}>
       {opening?.url && <ActionLink href={opening.url}>{t('openThread', { source: valueLabel(t, 'source', opening.source) })}</ActionLink>}
@@ -143,10 +142,8 @@ export function TicketPage({ id }: { id: string }) {
     {ended && <Hint>{ended}</Hint>}
     {data.attention && <div className="dt-banner"><span className="dt-banner-label">{t('attentionPrefix')}</span><MarkdownLite
       text={data.attention.question} />
-      {channel && <div className="dt-banner-actions">
-        <ActionLink href={channel.url} icon="message">{t('answerIn', { source: valueLabel(t, 'source', channel.source) })}</ActionLink>
-      </div>}</div>}
-    {/* Ordinary progress stays in the Session/Channels; only a report that halted work (blocked/failed) is shown here. */}
+      </div>}
+    {/* Ordinary progress stays in the Session; only a report that halted work (blocked/failed) is shown here. */}
     {data.actions.retry && data.summary && <p className={`dt-banner${failed ? ' dt-danger' : ''}${failedText ? ' dt-mono' : ''}`}>
       <span className="dt-banner-label">{t(failed ? 'failedPrefix' : 'blockedPrefix')}</span>{data.summary}
     </p>}
@@ -173,11 +170,6 @@ export function TicketPage({ id }: { id: string }) {
             className="dt-hint">{t('empty')}</span>}</td>
         </tr>)}</tbody></table>
       </Details>}
-      <Details icon="message" title={t('term.channel')}>
-        <ul className="dt-plain-list">{data.channels.map((item, index) => <li key={index}>
-          <ExternalLink href={item.url} icon={item.source === 'github' ? 'pull' : 'message'}>{localized(t, item.label)}</ExternalLink>
-        </li>)}</ul>
-      </Details>
       {data.inputs.length > undelivered.length && <Details icon="inbox" title={t('deliveredInputs',
         { count: data.inputs.length - undelivered.length })}>
         <InputList inputs={data.inputs.filter(input => input.delivered)} />

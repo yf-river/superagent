@@ -127,5 +127,5 @@ function CancelledIcon() {
   );
 }
 
-const STATUS_RENDERERS = {draft:BacklogIcon, queued:TodoIcon, working:InProgressIcon, waiting:BlockedIcon, review:InReviewIcon, done:DoneIcon, cancelled:CancelledIcon};
+const STATUS_RENDERERS = {draft:TodoIcon, working:InProgressIcon, waiting:BlockedIcon, review:InReviewIcon, done:DoneIcon, cancelled:CancelledIcon};
 export function StatusIcon({stage,className=""}:{stage:TaskStage;className?:string}){const Render=STATUS_RENDERERS[stage];return <svg viewBox="0 0 14 14" fill="none" aria-hidden="true" className={`size-3.5 shrink-0 st-status-${stage} ${className}`}><Render/></svg>}

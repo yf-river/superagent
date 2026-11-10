@@ -1,9 +1,7 @@
 /** 任务界面的 Multica 控件；通过现有 DSH 字典接收产品文字。 */
-import { useState, type ReactNode, type ButtonHTMLAttributes } from 'react'
+import { type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { Calendar, MoreHorizontal, X } from 'lucide-react'
-import { DayPicker } from 'react-day-picker'
-import { zhCN, enUS } from 'react-day-picker/locale'
+import { MoreHorizontal, X } from 'lucide-react'
 import { Button as OriginalButton } from './button.tsx'
 import { Popover, PopoverTrigger, PopoverContent } from './popover.tsx'
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from './select.tsx'
@@ -48,16 +46,4 @@ export function Modal({ title, children, onClose, closeLabel, className = '', di
       </Dialog.Popup>
     </Dialog.Portal>
   </Dialog.Root>
-}
-export function DatePicker({ value, onChange, t, disabled = false }: { value: string | null; onChange: (value: string | null) => void; t: T; disabled?: boolean }) {
-  const [open, setOpen] = useState(false)
-  const selected = value ? new Date(`${value}T12:00:00`) : undefined
-  return <Popover open={open} onOpenChange={setOpen}>
-    <PopoverTrigger disabled={disabled} render={<OriginalButton variant="ghost" size="sm" aria-label={t('task.dueDate')}/>}><Calendar className="size-3.5"/>{selected ? selected.toLocaleDateString(t('lang') === 'en' ? 'en' : 'zh-CN', { month: 'short', day: 'numeric' }) : t('task.noDueDate')}</PopoverTrigger>
-    <PopoverContent className="w-auto p-2" align="start"><DayPicker mode="single" selected={selected} defaultMonth={selected} locale={t('lang') === 'en' ? enUS : zhCN}
-      onSelect={day => { onChange(day ? `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}` : null); setOpen(false) }}
-      classNames={{root:'st-calendar', months:'relative', month_caption:'flex h-9 items-center justify-center text-body font-medium',nav:'absolute inset-x-0 top-0 flex justify-between',button_previous:'st-calendar-nav',button_next:'st-calendar-nav',month_grid:'w-full border-collapse',weekdays:'text-caption text-muted-foreground',weekday:'h-8 w-8 text-center font-normal',day:'size-8 text-center',day_button:'st-calendar-day',selected:'st-calendar-selected',today:'font-semibold',outside:'text-faint-foreground',chevron:'size-4 fill-current'}}/>
-      <Button onClick={() => { onChange(null); setOpen(false) }}>{t('task.clearDate')}</Button>
-    </PopoverContent>
-  </Popover>
 }

@@ -4,7 +4,6 @@ import { UserError } from './errors.ts'
 import { latestAssignment, liveTicket, runningAssignment } from './model.ts'
 import type { ReportState, Ticket } from './model.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
-import type { Replies } from './replies.ts'
 import { automatic, type Tickets } from './tickets.ts'
 
 /** What an Assignment reports: a worker's report, or the Executor's own (`waiting` after an idle turn, `failed` after an error). */
@@ -13,7 +12,7 @@ export interface WorkerReport {
   summary: string
   /** Open question for a person: a string asks it, `null` clears an open one, and `undefined` keeps the current one. */
   question?: string | null
-  /** The person's message whose request raised the question; routes the question to the channel where it was written. */
+  /** The person's message whose request raised the question; 用于关联原请求。 */
   askedBy?: string
   /** The person's question this report answers, which the worker thereby takes up; authorizes the main Session to send an answer reply. */
   answers?: string
@@ -24,11 +23,11 @@ const RECOVERY_NOTE = 'The host restarted during this ticket. Inspect the curren
  * Assignments records what the Executor and its workers report about the Assignments that run tickets: one started, Inputs
  * reached it or failed to, its worker's Session took Inputs into a step, a turn of its worker ended, a host restart
  * interrupted it, and a worker's report with its question for a person. It depends on
- * Tickets to restart or end a ticket and on Replies to withdraw a question a report replaced; the Engine routes the
+ * Tickets to restart or end a ticket; the Engine routes the
  * Executor's lifecycle callbacks and its workers' reports here.
  */
 export class Assignments extends EnginePart {
-  constructor(options: EngineOptions, private readonly tickets: Tickets, private readonly replies: Replies) { super(options) }
+  constructor(options: EngineOptions, private readonly tickets: Tickets) { super(options) }
 
   /** Marks a non-ended assignment running, queues delivery of waiting undelivered inputs on an open ticket, and emits `assignment.started`. */
   started(ticketId: string, assignmentId: string): void {
@@ -101,12 +100,12 @@ export class Assignments extends EnginePart {
     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
     if (report.question && (report.state === 'ready' || report.answers)) throw new UserError('questionWithResult')
     if (report.askedBy && !report.question) throw new UserError('askerWithoutQuestion')
-    const person = (id: string, channel: boolean) => {
+    const person = (id: string) => {
       const trigger = this.repo.triggers.get(id)
-      return !!trigger?.human && (!channel || !!trigger.channel) && this.reaches(ticket, trigger, false)
+      return !!trigger?.human && this.reaches(ticket, trigger, false)
     }
-    if (report.askedBy && !person(report.askedBy, true)) throw new UserError('notAsker')
-    if (report.answers && !person(report.answers, false)) throw new UserError('notAnswerable')
+    if (report.askedBy && !person(report.askedBy)) throw new UserError('notAsker')
+    if (report.answers && !person(report.answers)) throw new UserError('notAnswerable')
     const assignment = runningAssignment(ticket) ?? latestAssignment(ticket)
     if (!assignment) throw new UserError('unknownAssignment')
     if (assignment.state === 'ended') throw new UserError('assignmentEnded')
@@ -117,8 +116,6 @@ export class Assignments extends EnginePart {
     const attention = report.question === null || report.state === 'ready' ? undefined : asked
     if (attention) ticket.attention = attention
     else delete ticket.attention
-    // A replaced or cleared attention question withdraws any pending unsent reply for the previous question from the outbox.
-    if (previous && previous.id !== attention?.id) this.replies.withdrawAttention(previous.id)
     assignment.report = { state: report.state, summary: report.summary, at }
     ticket.updatedAt = at
     if (report.answers && !ticket.answers?.includes(report.answers)) ticket.answers = [...ticket.answers ?? [], report.answers]
@@ -129,6 +126,7 @@ export class Assignments extends EnginePart {
     const ready = !ticket.follows?.length ? 'completed' : this.tickets.followsDone(ticket)?.outcome
     // A dropped report after a close the ticket deferred ends it as the close did, which its final notice tells.
     const outcome = report.state === 'dropped' ? this.tickets.followsDone(ticket)?.outcome ?? 'dropped' : report.state === 'ready' ? ready : undefined
+    this.emit('assignment.reported', { ticketId })
     if (outcome) this.tickets.end(ticketId, 'executor', outcome, at)
     return this.require(ticketId)
   }

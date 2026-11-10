@@ -4,11 +4,11 @@ import type { SetupPlace } from '../setup.ts'
 import { DECISION_FILTERS, type DecisionFilter } from './api.ts'
 import type { T } from './text.ts'
 
-export const TABS = ['overview', 'source', 'trigger', 'eval', 'execution', 'settings'] as const
+export const TABS = ['overview', 'trigger', 'eval', 'execution', 'settings'] as const
 export type Tab = typeof TABS[number]
-export const SETTINGS_GROUPS = ['source', 'eval', 'execution', 'prompts', 'deployment'] as const
+export const SETTINGS_GROUPS = ['eval', 'execution', 'prompts', 'deployment'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
-export type Route = { page: 'overview' | 'source'; id?: undefined; query?: undefined }
+export type Route = { page: 'overview'; id?: undefined; query?: undefined }
   | { page: 'trigger'; id?: undefined; query?: { filter?: ThreadFilter } }
   | { page: 'trigger'; id: string; query?: { trigger?: string } }
   | { page: 'eval'; id?: undefined; query?: { filter?: DecisionFilter; window?: '24h' } }
@@ -19,7 +19,7 @@ export const HOME: Route = { page: 'overview' }
 export const settingsRoute = (group: SettingsGroup, query: { source?: string; version?: string } = {}): Route =>
   ({ page: 'settings', query: { group, ...query } })
 export const setupPage = (place: SetupPlace): Route =>
-  place === 'deployment' ? settingsRoute('deployment') : settingsRoute('source', { source: place })
+  settingsRoute('deployment')
 export const routeLabel = (t: T, route: Route): string =>
   route.id ? t(route.page === 'trigger' ? 'term.thread' : 'term.ticket') : t(`tab.${route.page}`)
 
@@ -34,13 +34,13 @@ export function parseRoute(value: unknown): Route | undefined {
   const text = (name: string) => typeof query?.[name] === 'string' ? query[name] as string : undefined
   const record = typeof id === 'string' && id ? id : undefined
   switch (page) {
-    case 'overview': case 'source': return { page }
+    case 'overview': return { page }
     case 'trigger': return record ? { page, id: record, query: compact({ trigger: text('trigger') }) }
       : { page, query: compact({ filter: pick(THREAD_FILTERS, query?.filter) }) }
     case 'eval': return { page, query: compact({ filter: pick(DECISION_FILTERS, query?.filter),
       window: query?.window === '24h' ? '24h' as const : undefined }) }
     case 'execution': return record ? { page, id: record } : { page, query: compact({ filter: pick(TICKET_FILTERS, query?.filter) }) }
-    case 'settings': return { page, query: { group: pick(SETTINGS_GROUPS, query?.group) ?? 'source',
+    case 'settings': return { page, query: { group: pick(SETTINGS_GROUPS, query?.group) ?? 'eval',
       ...compact({ source: text('source'), version: text('version') }) } }
     default: return undefined
   }
@@ -49,7 +49,7 @@ export function parseRoute(value: unknown): Route | undefined {
 const ROUTE_KEY = 'dsh-superagent/route'
 export interface Location { route: Route; stack: Route[]; group?: SettingsGroup | undefined }
 export const lastSettingsGroup = ({ route, group }: Location): SettingsGroup => route.page === 'settings' ? route.query.group
-  : group ?? 'source'
+  : group ?? 'eval'
 export function initialLocation(): Location {
   try {
     const stored = JSON.parse(sessionStorage.getItem(ROUTE_KEY) ?? 'null') as { route?: unknown; stack?: unknown; group?: unknown } | null

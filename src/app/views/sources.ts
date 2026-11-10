@@ -24,10 +24,8 @@ export interface SetupState {
   deployment?: Deployment | undefined
   /** Setup failure that stops all Sources. */
   problem?: SetupProblem | undefined
-  /** Feishu bot check failure that pauses only the Feishu Source. */
-  feishuProblem?: SetupProblem | undefined
 }
-export const problemOf = (id: string, setup: SetupState) => [setup.problem, setup.feishuProblem].find(problem => problem?.place === id)
+export const problemOf = (id: string, setup: SetupState) => [setup.problem].find(problem => problem?.place === id)
 /** Source lifecycle state in priority order: missing kind, disabled, setup/part error, blocked on global setup, starting, paused, or ready. */
 export type SourceState = 'missing' | 'off' | 'error' | 'setup' | 'starting' | 'paused' | 'ready'
 function sourceState(instance: SourceInstance & { installed: boolean }, parts: { state: string }[], setup: SetupState): SourceState {
@@ -46,25 +44,11 @@ export function sourcesStatus(host: ViewHost, health: HealthMap, setup: SetupSta
   const filtered = (source: string) => store.read.triggers({ source, filtered: true }, 0, 5).items.filter(trigger => trigger.at >= since)
     .map(trigger => ({ id: trigger.id, at: trigger.at, actor: view.actor(trigger.actor, trigger.human), preview: preview(trigger.text, 120),
       reason: store.triggers.disposition(trigger.id)?.filtered }))
-  const dropped = droppedReplies(host)
   return sources.instances().map(instance => {
     const { health: parts, ...named } = sourceHealth(sources, instance, health)
     const problem = problemOf(instance.id, setup)
     return { ...named, installed: instance.installed, enabled: instance.enabled, state: sourceState(instance, parts, setup), health: parts,
-      ...problem ? { problem } : {}, stats: stats[instance.id] ?? { received: 0, filtered: 0, lastAt: '' }, filtered: filtered(instance.id),
-      dropped: dropped.filter(item => item.channel.source === instance.id) }
+      ...problem ? { problem } : {}, stats: stats[instance.id] ?? { received: 0, filtered: 0, lastAt: '' }, filtered: filtered(instance.id) }
   })
 }
 export type SourceStatusView = ReturnType<typeof sourcesStatus>[number]
-/** Replies dropped in the last 24 hours, enriched with their associated ticket and thread. */
-export function droppedReplies({ store, links }: Pick<ViewHost, 'store' | 'links'>) {
-  // Fetch the exact 24-hour dropped count so this list's length matches the overview's `dropped` metric.
-  return store.read.droppedReplies(store.read.droppedSince(dayAgo())).map(item => {
-    const ticket = item.ticketId ? store.tickets.get(item.ticketId) : undefined
-    const { triggerId } = links(item.channel)
-    const home = triggerId ? store.triggers.get(triggerId)?.threads[0] : undefined
-    const thread = home ? threadKey(home) : store.threads.get(item.channel.thread) ? item.channel.thread : undefined
-    return { id: item.id, kind: item.kind, channel: item.channel, preview: preview(item.text), dropped: item.dropped,
-      ...ticket ? { ticket: { id: ticket.id, title: ticket.title } } : {}, ...thread ? { thread } : {} }
-  })
-}

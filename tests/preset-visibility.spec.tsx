@@ -71,13 +71,14 @@ function fixture(before = true, invalid = false) {
     original, removeOriginal: () => { removeOriginal() }, addOriginal: () => { removeOriginal = original() }, header }
 }
 
-it('filters only the two internal presets from the picker and settings without changing their source', () => {
+it('filters the internal presets from the picker while retaining a single complete settings section', () => {
   const f = fixture()
   const picker = f.face()
   const section = f.face(SETTINGS)
   const visible = ['standard', 'my-preset', 'dsh-superagent-worker-custom']
   expect(picker.hooks.agentPresetSeat.getSnapshot().options.map(row => row.id)).toEqual(visible)
-  expect(section.hooks.agentPresetSection.getSnapshot().rows.map(row => row.id)).toEqual(visible)
+  expect(section.hooks.agentPresetSection.getSnapshot().rows.map(row => row.id)).toEqual(ids)
+  expect(f.core.entries(SETTINGS).filter(row => row.options.id === 'agent-presets')).toHaveLength(1)
   expect(f.state.getSnapshot().options.map(row => row.id)).toEqual(ids)
   expect(f.entry().component).toBe(Picker)
   expect(f.entry(SETTINGS).options).toMatchObject({ id: 'agent-presets', order: 20, label: 'Modes' })

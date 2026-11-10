@@ -5,21 +5,19 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Store } from '../src/app/store.ts'
 import { SettingsSchema } from '../src/policy.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
-import { feishuKind } from '../src/sources/feishu.ts'
-import { githubKind } from '../src/sources/github.ts'
+import { feishuKind } from './fixtures/sources.ts'
+import { githubKind } from './fixtures/sources.ts'
 import { snapshot, threadSummary, ticketSummary, triggerView } from '../src/app/views/records.ts'
 import { basisFacts, ticketDetail } from '../src/app/views/tickets.ts'
 import { threadDetail } from '../src/app/views/threads.ts'
-import { droppedReplies, sourcesStatus } from '../src/app/views/sources.ts'
+import { sourcesStatus } from '../src/app/views/sources.ts'
 import { overview } from '../src/app/views/overview.ts'
 import { markdown, plain } from '../src/app/views/text.ts'
 import { policyHistory } from '../src/app/settings-history.ts'
 import { KV } from '../src/kv.ts'
-import { feishuLink } from '../src/sources/feishu-channel.ts'
-import { feishuChannel, feishuTriggerId } from '../src/sources/feishu-trigger.ts'
-import { githubLink } from '../src/sources/github-channel.ts'
-import { githubChannel } from '../src/sources/github-trigger.ts'
-import { followupOwners, type ChannelRef } from '../src/core/index.ts'
+
+
+import { followupOwners } from '../src/core/index.ts'
 
 let directory: string
 let store: Store
@@ -28,38 +26,17 @@ beforeEach(() => {
   store = new Store(join(directory, 'orchestrator.sqlite'))
 })
 afterEach(() => { store.close(); rmSync(directory, { recursive: true, force: true }) })
-const links = (channel: ChannelRef) => (channel.source === 'feishu' ? feishuLink : githubLink)(channel.address, {})
-const drop = (id: string, channel: ChannelRef, ticketId?: string) => {
-  const message = { id, channel, text: id, kind: 'reply' as const, ...ticketId ? { ticketId } : {} }
-  store.receipts.add(message)
-  store.receipts.settle(message, 'channelGone')
-}
-
-it('names the Thread of each dropped message: the one of the Trigger its Channel answers, or the Channel\'s own', () => {
-  // A Feishu Channel names its chat; the message it answers belongs to the Thread of the topic's root message.
-  store.triggers.save({ id: feishuTriggerId('om_reply'), source: 'feishu', threads: [{ source: 'feishu', id: 'oc_1:om_root' }],
-    actor: { source: 'feishu', id: 'ou_a' }, human: true, at: new Date().toISOString(), text: 'please', meta: {} })
-  store.threads.save({ key: 'github:42', ref: { source: 'github', id: '42' }, createdAt: '', subscriptions: [], correlated: [], pending: [],
-    meta: {} })
-  drop('a', feishuChannel('oc_1', 'om_reply'))
-  drop('b', githubChannel(42))
-  // A message whose Trigger and Thread the store no longer has links nowhere.
-  drop('c', feishuChannel('oc_2', 'om_gone'))
-  expect(Object.fromEntries(droppedReplies({ store, links }).map(item => [item.id, item.thread])))
-    .toEqual({ a: 'feishu:oc_1:om_root', b: 'github:42', c: undefined })
-})
-
 function views() {
   store.saveSettings(SettingsSchema.parse({ policy: { sources: { feishu: { allowed: [{ id: 'ou_alice', name: 'Alice' }] },
     github: { allowed: [{ id: 'alice' }] } },
     rules: [{ id: 'copy', name: 'Copy fixes', enabled: true, instruction: 'Fix copy' }] } }))
   const sources = new SourceRegistry(() => store.settings())
   sources.register(feishuKind); sources.register(githubKind)
-  return { store, sources, links }
+  return { store, sources }
 }
 const at = new Date().toISOString()
 /** A live ticket with no Assignment, as a follow-up's owner needs one. */
-const live = (id: string) => store.tickets.save({ id, title: id, decisionId: 'd', channels: [], undelivered: [], createdAt: at,
+const live = (id: string) => store.tickets.save({ id, title: id, decisionId: 'd',  undelivered: [], createdAt: at,
   updatedAt: at,
   mandate: { strength: 'explicit', policyVersion: 'v', basis: { via: 'listed' }, actor: { source: 'feishu', id: 'ou_alice' }, scope: '' },
   origin: { triggerId: 'e0', triggerIds: ['e0'] }, assignments: [], inputs: [] })
@@ -115,7 +92,7 @@ it('states each Source by the first state that holds', () => {
 it('follows the Ticket\'s stage: a blocked Ticket a person answered since is working, with no retry, note or turn end', () => {
   const host = views()
   const blocked = { state: 'blocked' as const, summary: 'Needs the design file', at: '2026-09-22T00:01:00Z' }
-  const ticket = { id: 't1', title: 'Fix', decisionId: 'd', channels: [], undelivered: [], createdAt: at, updatedAt: at,
+  const ticket = { id: 't1', title: 'Fix', decisionId: 'd',  undelivered: [], createdAt: at, updatedAt: at,
     mandate: { strength: 'explicit' as const, policyVersion: 'v', basis: { via: 'listed' as const }, actor: { source: 'feishu',
       id: 'ou_alice' }, scope: '' },
     origin: { triggerId: 'e1', triggerIds: ['e1'] }, assignments: [{ id: 'a1', state: 'running' as const, createdAt: at, startedAt: at,
@@ -175,16 +152,7 @@ it('lists an Eval past its deadline, and as dsh-superagent\'s own errors only pa
   expect(found.filter(item => item.kind === 'source-error').map(item => item.source.health.name)).toEqual(['feishu', 'history'])
 })
 
-it('says no Source runs when every Source is off, and states a Source missing or off', () => {
-  const host = views()
-  expect(problems(host).map(item => item.kind)).not.toContain('no-source')
-  const settings = store.settings()
-  store.saveSettings({ ...settings, sources: { feishu: { enabled: false, config: {} }, github: { enabled: false, config: {} },
-    jira: { enabled: true, config: { site: 'acme' } } } })
-  expect(problems(host).map(item => item.kind)).toContain('no-source')
-  expect(Object.fromEntries(sourcesStatus(host, {}, {}).map(source => [source.id, [source.state, source.installed]])))
-    .toEqual({ feishu: ['off', true], github: ['off', true], jira: ['missing', false] })
-})
+
 
 it('sends text without HTML, entity-encoded tags included, and with images named', () => {
   const text = '<div>Hello <b>there</b></div> &lt;script&gt;alert(1)&lt;/script&gt; <!-- note --> ![shot](https://x/y.png) [Image: diagram]'
@@ -224,7 +192,7 @@ it('names a listed bot as the Policy lists it, and gives a bot\'s Mandate a basi
   store.saveSettings(SettingsSchema.parse({ policy: { sources: { feishu: { allowed: [], bots: [{ id: 'cli_review', name: '评审机器人' }] } } } }))
   const sources = new SourceRegistry(() => store.settings())
   sources.register(feishuKind)
-  const view = snapshot({ store, sources, links })
+  const view = snapshot({ store, sources })
   expect(view.actor({ source: 'feishu', id: 'cli_review' }, false).name).toEqual({ zh: '评审机器人', en: '评审机器人' })
   expect(basisFacts({ via: 'bot', sender: '评审机器人', addressed: 'mention', observation: { mode: 'auto' } }, view.rule).facts)
     .toEqual([{ name: 'sender', value: '评审机器人' }, { name: 'bot' }, { name: 'addressed', value: 'mention' }, { name: 'mode', value: 'auto' }])
@@ -248,7 +216,7 @@ it('shows a follow-up that reached a ticket as delivered, the tickets that hande
   store.threads.save({ key: 'github:7', ref: { source: 'github', id: '7' }, createdAt: at, subscriptions: ['t1'], context: ['t1'],
     correlated: [], pending: [], meta: {} })
   expect(threadDetail(host, 'github:7', undefined, 50)?.context).toEqual(['t1'])
-  store.tickets.save({ id: 't1', title: 'Fix', decisionId: 'd', channels: [], undelivered: [], createdAt: at, updatedAt: at,
+  store.tickets.save({ id: 't1', title: 'Fix', decisionId: 'd',  undelivered: [], createdAt: at, updatedAt: at,
     mandate: { strength: 'explicit', policyVersion: 'v', basis: { via: 'listed' }, actor: { source: 'feishu', id: 'ou_alice' }, scope: '' },
     origin: { triggerId: 'e1', triggerIds: ['e1'] }, assignments: [],
     inputs: [{ id: 'i1', kind: 'trigger', triggerId: 'f1', at }, { id: 'i2', kind: 'trigger', triggerId: 'f2', at }] })
@@ -265,7 +233,7 @@ it('names a bot\'s Mandate as a bot once the Policy no longer lists it', () => {
   const mandate = { strength: 'inferred' as const, policyVersion: 'v', basis: { via: 'bot' as const,
     observation: { mode: 'auto' as const } },
     actor: { source: 'feishu', id: 'cli_removed' }, scope: '' }
-  store.tickets.save({ id: 't1', title: 'Fix', decisionId: 'd', channels: [], undelivered: [], createdAt: at, updatedAt: at, mandate,
+  store.tickets.save({ id: 't1', title: 'Fix', decisionId: 'd',  undelivered: [], createdAt: at, updatedAt: at, mandate,
     origin: { triggerId: 'e1', triggerIds: ['e1'] }, assignments: [], inputs: [] })
   expect(ticketDetail(host, 't1')!.mandate.actor).toEqual({ source: 'feishu', id: 'cli_removed', name: feishuKind.policy!.unnamed!.bot })
 })

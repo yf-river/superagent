@@ -30,7 +30,7 @@ export function usePageForm(form: ConfigForm<Record<string, unknown>> | undefine
 }
 
 /** Deployment configuration form; falls back to read-only display when DSH config forms are unavailable or read-only. */
-export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup: SetupView; form: DeploymentForm; accounts?: boolean }) {
+export function DeploymentPage({ setup, form }: { setup: SetupView; form: DeploymentForm }) {
   const { t, notify } = usePanel()
   const snapshot = form?.state
   const editable = snapshot?.status === 'ready' && snapshot.writable
@@ -44,7 +44,6 @@ export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup:
       notify(t('saved'))
       return { revision: revision + 1, restarting: false }
     } })
-  const accounts = setup.accounts
   // Remote browsers (`memory` mode) are read-only; `unavailable` indicates `dsh-superagent` is still starting.
   const readOnlyHint = !form ? t('deploymentNoForms') : snapshot?.status === 'loading' ? t('loading') : snapshot?.status === 'unavailable' ? t('deploymentUnavailable')
     : !editable ? t('deploymentReadOnly') : undefined
@@ -52,19 +51,12 @@ export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup:
     <Input type="number" min={LIMITS[key].min} max={LIMITS[key].max} step={1} value={draft.value[key]} disabled={!editable}
       onChange={event => draft.edit({ ...draft.value, [key]: event.target.value })} />
   </Field>
-  const feishu = accounts?.feishu ? accounts.feishu.name || accounts.feishu.botId
-    : setup.feishuProblem ? setupText(t, setup.feishuProblem) : t('deploymentFeishuNone')
   return <form className="dt-form" onSubmit={event => { void draft.submit(event) }}>
     <Fields disabled={draft.busy}>
       <Hint>{t('deploymentIntro')}</Hint>
       {setup.problem && <div className="dt-row-buttons">
         <p className="dt-error" role="status"><SetupMessage problem={setup.problem} lead /></p><CheckSetupButton />
       </div>}
-      {showAccounts && <Section title={t('deploymentDerived')} hint={t('deploymentDerivedHint')}>
-        <KeyValues rows={[[t('deploymentRepository'), accounts?.repository ?? '—'],
-          [t('deploymentAgent'), accounts ? `@${accounts.agent}` : '—'], [t('deploymentFeishu'), feishu]]} />
-        <Hint>{t('deploymentAccountsWhere')}</Hint>
-      </Section>}
       <Section title={t('deploymentMachine')}>
         {readOnlyHint && <Hint>{readOnlyHint}</Hint>}
         <div className="dt-field">
@@ -82,12 +74,12 @@ export function DeploymentPage({ setup, form, accounts: showAccounts }: { setup:
   </form>
 }
 
-/** Plugin Manager config page; includes derived repository and accounts because Source settings live in the main panel. */
+/** 插件管理页中的本地运行限制配置。 */
 function PluginPage({ form }: { form: DeploymentForm }) {
   const { t } = usePanel()
   const { state, error } = usePanelData()
   return <div className="dt-embedded">
-    {state ? <DeploymentPage setup={state.setup} form={form} accounts />
+    {state ? <DeploymentPage setup={state.setup} form={form} />
       : error ? <p className="dt-error" role="alert">{error.message}</p> : <p className="dt-hint">{t('loading')}</p>}
   </div>
 }

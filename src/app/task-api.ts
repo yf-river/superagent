@@ -5,13 +5,12 @@ import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-workspace'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { TaskError, Tasks, TaskCreateSchema, TaskCommandSchema, TaskPropertiesSchema, TaskPrioritySchema } from './tasks.ts'
+import { TaskError, Tasks, TaskCreateSchema, TaskCommandSchema } from './tasks.ts'
 import { TASK_STAGES } from './task-model.ts'
 import { dispatchManagement, type HttpHost } from './http.ts'
 
 const RequestSchema=z.object({method:z.enum(['GET','POST','PUT']),path:z.string().min(1),body:z.unknown().optional()}).strict()
 const ListSchema=z.object({q:z.string().optional(),directory:z.string().optional(),stage:z.enum(TASK_STAGES).optional(),
-  priority:TaskPrioritySchema.optional(),
   offset:z.coerce.number().int().nonnegative().default(0),limit:z.coerce.number().int().positive().max(200).default(50)})
 const UploadSchema=z.object({data:z.string(),name:z.string().min(1).max(255),mediaType:z.string()}).strict()
 
@@ -28,8 +27,9 @@ export class SuperagentApi extends TypertRemoteService {
     try {
       const {method,path,body}=RequestSchema.parse(input)
       const url=new URL(path,'http://task.local/'), parts=url.pathname.replace(/^\//,'').split('/').map(decodeURIComponent)
-      if(parts[0]!=='tasks' && parts[0]!=='task-assets' && parts[0]!=='task-directories') return dispatchManagement(this.management,method,path,body)
+      if(parts[0]!=='task-session' && parts[0]!=='tasks' && parts[0]!=='task-assets' && parts[0]!=='task-directories') return dispatchManagement(this.management,method,path,body)
       await this.management.ready
+      if(parts[0]==='task-session' && parts[1] && method==='GET') return {status:200,body:this.tasks.bySession(parts[1])}
       if(parts[0]==='task-directories' && method==='GET') return {status:200,body:this.ctx.workspaceRegistry.list().map(workspace=>({id:workspace.id,path:workspace.path,title:workspace.title}))}
       if(parts[0]==='task-assets' && method==='POST') {
         const upload=UploadSchema.parse(body), id=randomUUID()
@@ -55,10 +55,10 @@ export class SuperagentApi extends TypertRemoteService {
       }
       if(parts[0]!=='tasks') throw new TaskError('未知操作',404)
       const id=parts[1], action=parts[2]
+      if(id && action==='prepare' && method==='POST') return {status:200,body:await this.tasks.prepare(id,TaskCommandSchema.parse(body))}
       if(!id && method==='GET') return {status:200,body:this.tasks.list(ListSchema.parse(Object.fromEntries(url.searchParams)))}
       if(!id && method==='POST') return {status:200,body:await this.tasks.create(TaskCreateSchema.parse(body))}
       if(id && !action && method==='GET') return {status:200,body:this.tasks.detail(id,z.coerce.number().int().nonnegative().parse(url.searchParams.get('offset') ?? 0))}
-      if(id && action==='properties' && method==='PUT') return {status:200,body:this.tasks.properties(id,TaskPropertiesSchema.parse(body))}
       if(id && !action && method==='PUT') {
         const value=TaskCreateSchema.extend({revision:z.number().int().positive()}).parse(body)
         return {status:200,body:await this.tasks.edit(id,value)}

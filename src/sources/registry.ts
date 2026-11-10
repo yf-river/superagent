@@ -1,14 +1,14 @@
 /** Registry of installed Source kinds, their configured instances, and the Engine's SourceScope implementation. */
-import type { ChannelRef, OutboundMessage, ScopeResult, SourceScope, Trigger } from '../core/index.ts'
+import type { ScopeResult, SourceScope, Trigger } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { HealthBoard, type HealthEntry } from '../infra/health.ts'
 import { AdmissionTableSchema, type Settings } from '../policy.ts'
-import type { ChannelLink, ChannelLinks, SourceInstance, SourceKind, TriggerContext, VariableSpec } from './kind.ts'
+import type { SourceInstance, SourceKind, TriggerContext, VariableSpec } from './kind.ts'
 
 
 /**
  * Manages registered SourceKind plugins, validates their instance and policy configurations, and implements SourceScope for the Engine.
- * Claims each registered kind's health entries on HealthBoard and mediates access to source channels, links, environment variables, and thread context readers for Runtime, Settings, Outbox, and MasterAssessor.
+ * Claims each registered kind's health entries on HealthBoard and mediates access to source environment variables, and thread context readers for Runtime, Settings and MasterAssessor.
  */
 export class SourceRegistry implements SourceScope {
   private readonly kinds = new Map<string, SourceKind>()
@@ -72,13 +72,6 @@ export class SourceRegistry implements SourceScope {
     const parsed = policy.schema.safeParse(rest)
     return { ...parsed.success ? parsed.data : policy.schema.parse({}), admission: AdmissionTableSchema.safeParse(admission ?? {}).data ?? {} }
   }
-  channelAllowed(channel: { source: string; address: Record<string, string> }, settings = this.settings()): boolean {
-    const kind = this.kinds.get(channel.source)
-    if (!kind) return false
-    const instance = this.resolve(kind, settings.sources[channel.source])
-    return instance.enabled && (kind.channel?.allowed?.(channel.address, instance.config) ?? true)
-  }
-  /** Environment variable declarations for every installed kind, whether enabled or disabled. */
   declarations(): { kind: string; variables: readonly VariableSpec[] }[] {
     return [...this.kinds.values()].sort((a, b) => a.kind.localeCompare(b.kind)).flatMap(kind => kind.environment ? [{ kind: kind.kind, variables: kind.environment.variables }] : [])
   }
@@ -87,19 +80,6 @@ export class SourceRegistry implements SourceScope {
       const instance = this.resolve(kind, settings.sources[kind.kind])
       return kind.environment && instance.enabled ? [{ kind, environment: kind.environment, config: instance.config }] : []
     })
-  }
-  /**
-   * Sends a message idempotently through its Channel's kind; returns `'waiting'` while the kind is not installed, or
-   * `'gone'` when the target (or a kind without channels) can never receive it.
-   */
-  async send(message: OutboundMessage, commands: Commands): Promise<'sent' | 'gone' | 'waiting'> {
-    const kind = this.kinds.get(message.channel.source)
-    if (!kind) return 'waiting'
-    return kind.channel ? kind.channel.send({ commands }, message) : 'gone'
-  }
-  link(channel: ChannelRef, links: ChannelLinks): ChannelLink {
-    const link = this.kinds.get(channel.source)?.channel?.link(channel.address, links)
-    return link ?? { url: '', label: { zh: channel.source, en: channel.source } }
   }
   find(query: string): { threads: string[]; terms: string[] } {
     const found = [...this.kinds.values()].flatMap(kind => kind.find ? [kind.find(query)] : [])

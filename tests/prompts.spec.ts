@@ -48,9 +48,9 @@ it('assembles every role from fixed sections around the team sections, whatever 
   const config = { communication: 'Say little.', scope: '', delivery: 'Attach screenshots.', skills: {} }
   for (const role of ['orchestrator', 'worker'] as const) {
     const names = promptParts(config, role, 'env').map(part => part.name)
-    expect(names).toEqual(['runtime/shared', `runtime/${role}`, 'communication', 'delivery', 'runtime/subscriptions', 'runtime/replies', role === 'orchestrator' ? 'runtime/dispatch' : 'runtime/work', ...role === 'orchestrator' ? ['runtime/admission'] : [], 'runtime/handoff', 'runtime/environment'])
+    expect(names).toEqual(['runtime/shared', `runtime/${role}`, 'communication', 'delivery', 'runtime/subscriptions', role === 'orchestrator' ? 'runtime/dispatch' : 'runtime/work', ...role === 'orchestrator' ? ['runtime/admission'] : [], 'runtime/handoff', 'runtime/environment'])
     const prompt = composePrompt(config, role)
-    for (const fixed of [sharedPrompt, role === 'orchestrator' ? masterPrompt : workerPrompt, guides.subscriptions!, guides.replies!, handoffPolicy(role)]) expect(prompt).toContain(fixed)
+    for (const fixed of [sharedPrompt, role === 'orchestrator' ? masterPrompt : workerPrompt, guides.subscriptions!, handoffPolicy(role)]) expect(prompt).toContain(fixed)
     expect(prompt.endsWith(handoffPolicy(role))).toBe(true)
   }
   expect(composePrompt(config, 'orchestrator')).toContain(mainAdmissionPolicy)
@@ -95,7 +95,6 @@ it('rejects unknown keys, built-in skill names and oversized configuration befor
     const prompts = promptsOf(store)
     expect(() => prompts.save({ ...defaultPrompts(), shared: 'x' }, 0, 'panel')).toThrow()
     expect(() => prompts.save({ communication: '', scope: '' }, 0, 'panel')).toThrow()
-    for (const name of ['github', 'feishu']) expect(() => prompts.save({ ...defaultPrompts(), skills: { [name]: 'mine' } }, 0, 'panel')).toThrow('built-in skill')
     expect(() => prompts.save({ ...defaultPrompts(), skills: { 'Bad Name': 'x' } }, 0, 'panel')).toThrow()
     expect(() => promptsOf(store, 1000).save(defaultPrompts(), 0, 'panel')).toThrow('exceeds')
     expect(prompts.current().revision).toBe(0)
@@ -112,16 +111,7 @@ it('lists a ticket\'s execution environment in its prompt, and says setup is inc
   })
 })
 
-it('registers the built-in Source skills, Feishu only with a Feishu bot, before the team skills', () => {
-  withStore(store => {
-    const config = { ...defaultPrompts(), skills: { release: 'Tag releases.' } }
-    const skills = promptsOf(store).skills(config)
-    expect(skills.map(([name]) => name)).toEqual(['feishu', 'github', 'release'])
-    expect(skills[1]![1]).toContain('## CLI usage')
-    expect(skills[2]![1]).toBe('Tag releases.')
-    expect(new Prompts(store, () => 100000, variables, () => false).skills(config).map(([name]) => name)).toEqual(['github', 'release'])
-  })
-})
+
 
 
 describe('overrides of built-in parts', () => {
@@ -131,14 +121,14 @@ describe('overrides of built-in parts', () => {
     withStore(store => {
       const prompts = promptsOf(store)
       const edited = prompts.validate(config({ 'runtime/shared': { text: 'Shared, the team way.' }, 'runtime/dispatch': { text: '## dispatch\nRoute well.' },
-        'runtime/handoff/worker': { text: 'Hand off as a worker.' }, 'skill/github': { text: 'GitHub, the team way.' } }))
+        'runtime/handoff/worker': { text: 'Hand off as a worker.' } }))
       const main = prompts.compose(edited, 'orchestrator'), worker = prompts.compose(edited, 'worker')
       for (const prompt of [main, worker]) expect(prompt.startsWith('Shared, the team way.\n\n')).toBe(true)
       expect(main).toContain('## dispatch\nRoute well.')
       expect(main).not.toContain(guides.dispatch)
       expect(worker).toContain('Hand off as a worker.')
       expect(main).toContain(handoffPolicy('orchestrator'))
-      expect(prompts.skills(edited)).toContainEqual(['github', 'GitHub, the team way.'])
+      expect(prompts.skills(edited)).toEqual([])
       // The parts say what they are edited by.
       expect(promptParts(edited, 'worker').find(part => part.name === 'runtime/handoff')).toMatchObject({ key: 'runtime/handoff/worker',
         text: 'Hand off as a worker.' })
@@ -183,14 +173,14 @@ describe('overrides of built-in parts', () => {
       expect(saved.config.overrides!['runtime/dispatch']!.base).toBe(builtInBase(`## dispatch\n${guides.dispatch}`))
       expect(prompts.defaultChanged(saved.config)).toEqual([])
       // One edited from a built-in text an earlier version shipped, which this installation kept when it was saved.
-      const earlier = '## replies\nAn earlier built-in text.'
+      const earlier = '## subscriptions\nAn earlier built-in text.'
       store.set(KV.prompts.builtIn(builtInBase(earlier)), earlier)
-      const upgraded = prompts.save(config({ ...saved.config.overrides, 'runtime/replies': { text: 'Our replies.', base: builtInBase(earlier) },
+      const upgraded = prompts.save(config({ ...saved.config.overrides, 'runtime/subscriptions': { text: 'Our subscriptions.', base: builtInBase(earlier) },
         'runtime/work': { text: 'Our work.', base: 'unknown' } }), saved.revision, 'panel')
-      expect(prompts.defaultChanged(upgraded.config)).toEqual([{ part: 'runtime/replies', base: builtInBase(earlier), previous: earlier },
+      expect(prompts.defaultChanged(upgraded.config)).toEqual([{ part: 'runtime/subscriptions', base: builtInBase(earlier), previous: earlier },
         { part: 'runtime/work', base: 'unknown' }])
       // Kept as it was: an upgrade never replaces the team's text.
-      expect(prompts.compose(prompts.current().config, 'worker')).toContain('Our replies.')
+      expect(prompts.compose(prompts.current().config, 'worker')).toContain('Our subscriptions.')
     })
   })
   it('reads a configuration saved before overrides existed unchanged', () => {

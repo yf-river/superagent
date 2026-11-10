@@ -15,9 +15,10 @@ async function patched(): Promise<Row[]> {
   const yaml = await import(createRequire(include).resolve('js-yaml')) as { load(text: string, options: { schema: unknown }): unknown }
   const patches = yaml.load(readFileSync(join(import.meta.dirname, '..', 'cordis.patch.yml'), 'utf8'), { schema: entryListSchema }) as unknown[]
   const warnings: string[] = []
-  const rows = applyEntryPatches([], patches, message => { warnings.push(message) })
+  const rows = applyEntryPatches([{ id: 'permission', name: '@deepseek-ai/dsh-permission-presets' }], patches, message => { warnings.push(message) })
   expect(warnings).toEqual([])
-  return rows
+  expect(rows.find(row => row.id === 'permission')?.config).toMatchObject({ defaultPreset: 'danger-full-access' })
+  return rows.filter(row => row.id !== 'permission')
 }
 /** Every plugin row of a preset, those inside groups too. */
 const flat = (rows: readonly Row[]): Row[] => rows.flatMap(row => [row, ...Array.isArray(row.config) ? flat(row.config) : []])

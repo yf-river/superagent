@@ -1,5 +1,5 @@
-/** Ports the core depends on. Sources, policies, assessors, executors, and channels are project-specific. */
-import type { Assignment, ChannelRef, Decision, DecisionKind, Mandate, MandateBasis, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
+/** Ports the core depends on. Sources, policies, assessors, and executors are project-specific. */
+import type { Assignment, Decision, DecisionKind, Mandate, MandateBasis, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
   from './model.ts'
 import type { Reason } from './reasons.ts'
 
@@ -41,7 +41,7 @@ export type AssessmentOutcome =
   | { kind: 'ignore'; reason: string | Reason; audit?: Record<string, unknown> }
   | { kind: 'unavailable'; reason: string | Reason; audit?: Record<string, unknown> }
   /** An accept: `rules` the assessment matched, `name` the ticket's requested short name, and `note` a routing note for its worker. */
-  | { kind: 'accept'; title: string; scope: string; reason: string | Reason; acknowledgement?: string; rules?: string[]; audit?: Record<string, unknown>;
+  | { kind: 'accept'; title: string; scope: string; reason: string | Reason; rules?: string[]; audit?: Record<string, unknown>;
     name?: string; note?: string; execution?: { strategy: 'shared' | 'worktree'; reason: string } }
   | { kind: 'stop'; ticketId: string; reason: string | Reason; audit?: Record<string, unknown> }
 
@@ -68,20 +68,6 @@ export interface Executor {
   stop(ticket: Ticket, assignment: Assignment, reason: string): void
 }
 
-/** A message for a Channel; `ticketId` names the Ticket it is for, when there is one. */
-export interface OutboundMessage { id: string; channel: ChannelRef; text: string; kind: 'acknowledgement' | 'reply' | 'notice'; ticketId?: string }
-/** A queued message waits (`pending`), went out (`sent`), or was dropped because its conversation can never receive it (`dropped`). */
-export type ReplyStatus = 'pending' | 'sent' | 'dropped'
-/** The messages queued for Channels; the Engine queues them inside its commands, and a sender delivers them later. */
-export interface Outbox {
-  /** Queue a message idempotently; an id queued before keeps its first message. */
-  send(message: OutboundMessage): void
-  /** Whether a message was queued, and what became of it. */
-  status(id: string): ReplyStatus | undefined
-  /** Withdraw a message that has not gone out. */
-  withdraw(id: string): void
-}
-
 /** What the Engine reports after a change, by event type. */
 export interface DomainEvents {
   'trigger.received': { triggerId: string; threads: string[] }
@@ -90,6 +76,7 @@ export interface DomainEvents {
   'ticket.created': { ticketId: string; decisionId: string; strength: Strength }
   'ticket.resumed': { ticketId: string; triggerId: string }
   'ticket.ended': { ticketId: string; by: TicketEndBy; outcome: TicketOutcome; reason?: string }
+  'assignment.reported': { ticketId: string }
   'assignment.started': { ticketId: string; assignmentId: string }
   'assignment.ended': { ticketId: string; assignmentId: string; reason: string }
   'thread.subscribed': { threadKey: string; ticketId: string }

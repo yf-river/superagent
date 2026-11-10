@@ -75,7 +75,7 @@ function visibleSource(value: unknown, field: string): Source {
 }
 
 /**
- * 安装客户端子插件，仅覆盖选择器和设置列表；宿主注册表及会话标签仍读取完整预设。
+ * 仅过滤新会话选择器；设置保留完整预设目录，供查看系统内部配置。
  * @param ctx - 提供 DSH UI 插槽的客户端上下文。
  */
 export function apply(ctx: Context): void {
@@ -84,7 +84,6 @@ export function apply(ctx: Context): void {
   const sources = new WeakMap<object, Map<string, Source>>()
   const targets: Target[] = [
     { slot: 'conversation.hero.agentPreset', hook: 'agentPresetSeat', field: 'options' },
-    { slot: 'settings.section', id: 'agent-presets', hook: 'agentPresetSection', field: 'rows' },
   ]
   for (const target of targets) {
     slots.inject(target.slot, () => {

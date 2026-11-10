@@ -19,8 +19,6 @@ export interface EffectPayloads {
   relay: { text: string }
   /** Inject a notice into the main Session without waking it; the key names what it reports, such as `prompts`. */
   notice: { value: Record<string, unknown>; summary: string }
-  /** Send a message for a Channel through its Source; the key is the message ID, whose receipt the Outbox keeps. */
-  reply: Record<string, never>
 }
 export type EffectKind = keyof EffectPayloads
 interface Handler<K extends EffectKind> {
@@ -41,7 +39,7 @@ type Task = { kind: EffectKind; key: string; done: Promise<void> }
 
 /**
  * Durable SQLite-backed queue that persists side effects inside command transactions and dispatches them after commit.
- * Coordinates per-kind handlers, concurrency limits, exponential backoff, and health reporting for MasterAssessor, DshExecutor, Sessions, and Outbox.
+ * Coordinates per-kind handlers, concurrency limits, exponential backoff, and health reporting for MasterAssessor, DshExecutor, and Sessions.
  */
 export class Effects {
   private readonly handlers = new Map<EffectKind, Handler<never>>()

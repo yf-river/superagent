@@ -42,23 +42,7 @@ it('keeps a conflicting prompt draft, rebases it onto the newer version and save
   expect(server.prompts.current.config).toMatchObject({ communication: 'Mine', scope: 'Theirs' })
 })
 
-it('shows a built-in skill with the CLI notes in the full prompt, editable as a built-in part, and adds a team skill but no skill under a built-in name', async () => {
-  at({ page: 'settings', query: { group: 'prompts' } })
-  await mount()
-  await click(tab(zh.promptViewFull))
-  await act(async () => { const select = field<HTMLSelectElement>(zh.promptPreviewTarget); select.value = 'skill/github'; select.dispatchEvent(new Event('change', { bubbles: true })) }); await settle()
-  expect(text()).toContain('## CLI usage')
-  expect(all('.dt-preview-part[data-editable] b').map(name => name.textContent)).toEqual([zh['promptPart.skill/github']])
-  await click(tab(zh.promptViewEdit))
-  for (const name of ['Bad Name', 'github']) {
-    await type(field<HTMLInputElement>(zh.promptAddSkill), name)
-    await click(zh.promptAddSkillAction)
-    expect(document.querySelector('[role="alert"]')?.textContent).toBe(zh.promptSkillNameInvalid)
-  }
-  await type(field<HTMLInputElement>(zh.promptAddSkill), 'testing')
-  await click(zh.promptAddSkillAction)
-  expect(all('.dt-nav-item').map(item => item.textContent)).toContain('dsh-superagent-testing')
-})
+
 
 it('loads all defaults into the draft from the history without saving them', async () => {
   server.prompts.current = promptVersion(0, { ...defaultPrompts(), scope: 'Old scope' })

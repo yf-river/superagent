@@ -1,6 +1,7 @@
 import { Tasks } from './tasks.ts'
 import { SuperagentApi } from './task-api.ts'
-import { installTaskTools, taskContent } from './task-tools.ts'
+import { installTaskTools, taskContent, taskAssetsContent } from './task-tools.ts'
+import { prepareExecutionDirectory } from '../executor/local-directory.ts'
 import { localKind } from '../sources/local.ts'
 /** Application composition root and lifecycle manager for dsh-superagent. */
 import { Service, type Context } from '@deepseek-ai/cordis'
@@ -34,15 +35,11 @@ import { TextCache } from './cache.ts'
 import { Effects } from './effects.ts'
 import { Prompts } from './prompts.ts'
 import { registerHttp, type HttpHost } from './http.ts'
-import type { LinkTarget } from './views/records.ts'
 import { candidateCard, repliedTo, sourceLink, type LinkHost } from './links.ts'
 import { eventNotice, followupNotice } from './notices.ts'
-import { pullEndNotices } from '../sources/github-pull.ts'
 import { HealthBoard } from '../infra/health.ts'
-import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
-import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
 import { Settings } from './settings.ts'
@@ -56,7 +53,7 @@ declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceH
 const now = (): string => new Date().toISOString()
 
 /**
- * Composition root of dsh-superagent that connects `Store`, `Setup`, `Engine`, `SourceRegistry`, `Effects`, `Outbox`, `Passes`, `Sessions`, `Settings`, `Prompts`, `DshExecutor`, and `MasterAssessor`.
+ * Composition root of dsh-superagent that connects `Store`, `Setup`, `Engine`, `SourceRegistry`, `Effects`, `Passes`, `Sessions`, `Settings`, `Prompts`, `DshExecutor`, and `MasterAssessor`.
  * Exposes the `SourceHost` service on the Cordis context for source plugins and coordinates startup, setup checks, HTTP route registration, and graceful shutdown.
  * Locks the state directory before opening SQLite so concurrent processes cannot corrupt or double-migrate state.
  */
@@ -72,7 +69,6 @@ export class Runtime extends Service implements SourceHost {
   readonly settings: Settings
   readonly executor: DshExecutor
   readonly assessor: MasterAssessor
-  readonly outbox: Outbox
   readonly engine: Engine
   readonly passes: Passes
   readonly ready: Promise<void>
@@ -104,9 +100,10 @@ export class Runtime extends Service implements SourceHost {
       const setup = this.setup = new Setup({ context: ctx, machine, lifetime: this.lifetime, restart })
       const deployed = () => setup.configured()
         ? environmentOf({ deployment: setup.deployment, sources: this.sources, settings: store.settings() }) : undefined
-      const feishu = () => setup.configured() && !!setup.deployment.feishu
-      const prompts = this.prompts = new Prompts(store, () => machine.promptMaxChars.get(), deployed, feishu, () => !store.settings().sources.github?.config.repository)
-      const masterId = this.masterId = store.get(KV.runtime.masterId) ?? `orchestrator-${key(machine.stateDir)}`
+      const feishu = () => false
+      const prompts = this.prompts = new Prompts(store, () => machine.promptMaxChars.get(), deployed, feishu, () => true)
+      const savedRouter = store.get(KV.runtime.masterId)
+      const masterId = this.masterId = savedRouter && savedRouter !== store.get<string>('master-id') ? savedRouter : `local-router-${key(machine.stateDir)}`
       store.set(KV.runtime.masterId, masterId)
       const commands = this.commands = new Commands(() => setup.deployment, setup.commandEnvironment, this.lifetime)
       const board = this.board
@@ -122,9 +119,9 @@ export class Runtime extends Service implements SourceHost {
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
       const resources: ResourceHost = { store, pages: new TextCache(4_000_000), prompts, commands, masterId, context: ctx,
         promptVersion: id => this.sessions.promptVersion(id), mayRead: (id, revision) => this.sessions.mayRead(id, revision),
-        feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link }
+         sourceLink: link }
       const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'), masterId,
-        lifetime: this.lifetime, localMode: () => !setup.deployment.github,
+        lifetime: this.lifetime, localMode: () => true,
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
@@ -136,11 +133,11 @@ export class Runtime extends Service implements SourceHost {
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
-      const outbox = this.outbox = new Outbox({ store, effects, sources, commands, paused: () => this.paused() })
       const { assessor, executor } = this
       const policy = () => settingsPolicy(store.settings(), sources)
       const engine = this.engine = new Engine({ repo: store, scope: sources, policy, assessor, executor,
-        outbox, prepareTicket: (ticket, outcome) => store.triggers.get(ticket.origin.triggerId)?.source === 'local' ? this.tasks.assign(ticket,outcome) : executor.prepare(ticket, outcome), emit: event => {
+        prepareTicket: (ticket, outcome) => store.triggers.get(ticket.origin.triggerId)?.source === 'local' ? this.tasks.assign(ticket,outcome) : executor.prepare(ticket, outcome), emit: event => {
+          if (event.type === 'assignment.reported') this.tasks.recordReport(event.data.ticketId)
           // Notify the main Session only about domain events it did not initiate itself.
           const notice = this.quiet ? undefined : eventNotice(event, id => store.tickets.get(id))
           if (notice) sessions.notify(...notice)
@@ -149,33 +146,32 @@ export class Runtime extends Service implements SourceHost {
           const followed = !this.quiet && (event.type === 'trigger.received' || event.type === 'ticket.resumed' || event.type === 'trigger.followup')
           const followup = followed ? followupNotice(store, sources, event.data.triggerId) : undefined
           if (followup) sessions.relay(followup.id, followup.text)
-          // Notify the ticket's conversations whenever it ends via a pull request.
-          const ended = event.type === 'ticket.ended' ? store.tickets.get(event.data.ticketId) : undefined
-          if (ended && setup.configured() && setup.deployment.repository) {
-            const request = store.triggers.get(ended.origin.triggerId)?.text ?? ''
-            for (const message of pullEndNotices(ended, request, setup.deployment.repository)) outbox.send(message)
-          }
+
         } })
       // Update the `evals` health entry on every pass if an evaluation failed as unavailable within the last hour.
       const evals = board.claim('evals', { state: 'ready', detail: 'No unavailable Eval in the last hour' })
       const evaluateDue = () => { engine.evaluateDue(); evals.set(evalsHealth(store)) }
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
-      this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
+      this.sourceDeps = { store, engine, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
-        get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
-      this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
-        get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
-        requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
+        get setupProblem() { return setup.problem }, receive: trigger => passes.receive(trigger) }
+      this.toolHost = { get tasks() { return runtime.tasks }, context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
+        requestPass: () => { passes.request() },
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }
       this.tasks = new Tasks({store,engine,stateDir:machine.stateDir,routerSessionId:masterId,requestPass:()=>passes.request(),
+        requestPreparation:task=>sessions.relay(`task-prepare:${task.id}:${task.preparation!.generation}`, JSON.stringify({kind:'prepare_task_directory',
+          task_id:task.id,generation:task.preparation!.generation,title:task.title,description:task.description,project_directory:task.directory,strategy:task.strategy,
+          instruction:'Call orchestrator_prepare_task with this task_id and generation. Choose shared for reading, environment operations and non-Git tasks; worktree for Git code changes. Respect an explicit strategy. Prepare only: do NOT call orchestrator_route, run task commands, or start a Worker.'})),
+        prepareDirectory:(execution,save,current)=>prepareExecutionDirectory(execution,{context:ctx,lifetime:this.lifetime},save,current),
+        ensureSession:async(id,directory,title)=>{await sessions.ensure(id,directory,title,'task'); const task=this.tasks.detail(id.slice(5)); await sessions.prompt(id,`task-request:${task.id}:${key(task.title,task.description,...task.assets)}`,`${task.title}\n\n${task.description}`,{inject:'任务需求',fullMessage:true},undefined,undefined,taskAssetsContent(this.tasks,task.assets))},
         retryRouting:(trigger,requestId)=>sessions.relay(`retry-routing:${requestId}`,JSON.stringify({kind:'candidate',trigger_id:trigger.id,
           text:trigger.text,local_task:{id:trigger.meta.taskId,project_directory:trigger.meta.directory,strategy:trigger.meta.strategy},
           instruction:'The owner explicitly retries this local task. Accept it once using orchestrator_route; respect its recorded directory strategy.'}))})
       this.disposers.push(ctx.on('session/event',(session,event)=>{
         if(session.id===masterId && event.type==='turn/end' && event.data.reason.kind==='error') this.tasks.routingFailed(event.data.reason.error.message)
       }))
-      this.disposers.push(sources.register(localKind(this.tasks)))
+      this.disposers.push(sources.register(localKind()))
       this.ready = this.initialize()
     } catch (error) {
       // Release the database and state lock if initialization fails so an in-process restart can reacquire them.
@@ -191,13 +187,6 @@ export class Runtime extends Service implements SourceHost {
   get deployment(): Deployment { return this.setup.deployment }
   configured(): boolean { return this.setup.configured() }
   get setupProblem(): SetupProblem | undefined { return this.setup.problem }
-  /** Why the Feishu bot is unavailable even though the Feishu Source configures a CLI. */
-  get feishuProblem(): SetupProblem | undefined { return this.setup.feishuProblem }
-  links(): LinkTarget {
-    const resolved = this.setup.configured() ? this.setup.deployment : undefined
-    const links = resolved ? { repository: resolved.repository, ...(resolved.feishu ? { feishu: resolved.feishu } : {}) } : {}
-    return channel => this.sources.link(channel, links)
-  }
   ticketEnvironment(ticket: Ticket): Variable[] {
     const trigger = sourceTrigger(this, ticket)
     const { setup: { deployment }, sources } = this
@@ -207,9 +196,8 @@ export class Runtime extends Service implements SourceHost {
   receive(trigger: Trigger): ReceiveResult { return this.passes.receive(trigger) }
   idle(): Promise<void> { return this.passes.idle() }
   pump(): Promise<void> { return this.passes.pump() }
-  sendReplies(): Promise<void> { return this.outbox.sent() }
   private closing(): boolean { return this.closingFlag }
-  /** Hold evaluation, dispatch, and outbound delivery while paused or awaiting setup; sources still record incoming triggers. */
+  /** Hold evaluation and dispatch while paused or awaiting setup; sources still record incoming triggers. */
   private paused(): boolean { return !this.setup.configured() || this.store.settings().paused }
   private async initialize(): Promise<void> {
     // Register management HTTP routes before setup completes so operators can fix setup problems in the UI.
@@ -219,6 +207,15 @@ export class Runtime extends Service implements SourceHost {
       this.runtimeHealth.set({ ...health('paused', 'setupPending'), at: now() })
       return
     }
+    const defaultPermission = (agent: Agent) => {
+      if (agent.session.header.origin === 'subagent' || this.store.get(KV.runtime.permissionDefaulted(agent.id))) return
+      if (!agent.session.snapshotEvents().some(event => event.type === 'turn/start')) {
+        this.ctx.permissionPresets.set(agent.session, 'danger-full-access')
+        this.store.set(KV.runtime.permissionDefaulted(agent.id), true)
+      }
+    }
+    this.disposers.push(this.ctx.on('agent/created', ({agent}) => { defaultPermission(agent) }))
+    for (const agent of this.ctx.agents.list()) defaultPermission(agent)
     this.sessions.install()
     this.executor.install()
     this.disposers.push(installTaskTools(this.ctx,this.tasks,this.masterId))
@@ -226,6 +223,7 @@ export class Runtime extends Service implements SourceHost {
     for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
     // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
     if (this.closing()) return
+    this.tasks.resumePreparation()
     this.executor.resume()
     this.passes.start()
     this.effects.start()
@@ -236,8 +234,8 @@ export class Runtime extends Service implements SourceHost {
     const { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, sourceLinks, setup, passes } = this
     return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, sourceLinks,
       get ready() { return runtime.ready }, get deployment() { return setup.deployment },
-      get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
-      configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
+      get setupProblem() { return setup.problem },
+      configured: () => setup.configured(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
       checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog() }
   }
   /** Idempotent stop; concurrent or repeated calls share the same shutdown promise. */
@@ -246,7 +244,7 @@ export class Runtime extends Service implements SourceHost {
     this.closingFlag = true; const passes = this.passes.stop(); this.stopped.abort()
     try {
       this.assessor.stop()
-      const ids = [this.masterId, ...this.store.tickets.list().map(ticket => workerSessionId(ticket.id))]
+      const ids = [this.masterId, ...this.store.tickets.list().map(ticket => workerSessionId(ticket))]
       const agents = ids.map(id => this.ctx.agents.get(id as SessionId)).filter((agent): agent is Agent => agent !== undefined)
       for (const agent of agents) agent.cancel({ kind: 'user' }, { keepInbox: true })
       await Promise.allSettled([passes, this.effects.drain(), ...agents.map(agent => agent.whenIdle())])
@@ -258,7 +256,6 @@ export class Runtime extends Service implements SourceHost {
       await this.ctx.sessionPersistence.flush()
     } finally {
       // Close the database before releasing the directory lock so another process cannot open the database mid-write; a compromised lock may already be released.
-      this.setup.restore()
       try { this.store.close() } finally {
         const unreleased = (error: unknown) => { this.ctx.logger.warn('dsh-superagent could not release its state directory lock: %s',
           String(error)) }

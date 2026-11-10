@@ -5,7 +5,6 @@
 import type { PromptVersion } from './app/prompts.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
-import type { Retry } from './sources/github.ts'
 
 /** Key of a KV record whose value has type `V`; a plain string represents an untyped key. */
 export type Key<V> = string & { readonly __value?: V }
@@ -30,7 +29,7 @@ export const KV = {
     /** The built-in text of a prompt part an override was edited from, by its `base`, which shows what an upgrade changed. */
     builtIn: family<string, [base: string]>('prompt-built-in:') },
   /** Runtime: the main Session's ID. */
-  runtime: { masterId: record<string>('master-id') },
+  runtime: { masterId: record<string>('local-router-session'), permissionDefaulted: family<boolean, [sessionId: string]>('permission-defaulted:') },
   /** Sessions: prompt revisions each Session has worked under, ordered oldest first; the last entry (`.at(-1)`) is its active revision. */
   sessions: { roleModel: family<string, [sessionId: string]>('session-role-model:'), prompts: family<number[], [session: string]>('session-prompts:') },
   /** Schema 11 migration: legacy main-Session queues imported into the effect table. */
@@ -38,21 +37,4 @@ export const KV = {
     prompts: record<number | null>('prompt-notification'), settings: record<number | null>('settings-notification') },
   /** Per-Source resolved display names mapping a named ID (such as a Feishu chat ID) to its display name. */
   sources: { labels: family<Record<string, string>, [source: string]>('source-labels:') },
-  /**
-   * GitHub Source: notification cursor and pending retries; per-Issue/PR read cursor shared by notification and polled reads;
-   * per-stream cursor, start times by kind, and ETag; default-branch CI state; and per-PR CI fingerprint and revision (`revision`
-   * counts reported CI changes so each produces a distinct Trigger ID).
-   */
-  github: { since: record<string>('github-since'), retries: record<Record<string, Retry>>('github-retry'),
-    cursor: family<string, [number: number]>('github-cursor:'),
-    stream: family<{ since: string; started: Record<string, string>; etag?: string }, [stream: string]>('github-stream:'),
-    branchCi: record<{ branch?: string; failures?: string[]; revision: number }>('github-branch-ci'),
-    ci: family<{ fingerprint: string; revision: number }, [number: number]>('github-ci:') },
-  /**
-   * Feishu Source: known chats (`true` for direct messages); per-chat history cursor and active topics mapped from topic ID
-   * to last-seen timestamp; and per-polled-thread seen message IDs and initialization flag.
-   */
-  feishu: { chats: record<Record<string, boolean>>('feishu-chats'), history: family<string, [chat: string]>('feishu-history:'),
-    topics: family<Record<string, string>, [chat: string]>('feishu-history-threads:'),
-    seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
 }

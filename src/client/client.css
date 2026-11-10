@@ -119,10 +119,6 @@
 .dt-preview-part { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 2px 12px; border-left: 2px solid var(--dsw-alias-border-l3); }
 .dt-preview-head { font-size: 13px; line-height: 20px; display: flex; align-items: baseline; gap: 8px; }
 div.dt-preview-head { color: var(--dsw-alias-label-secondary); }
-.dt-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 16px; min-width: 0; }
-.dt-card-head { display: flex; align-items: center; gap: 12px; min-height: 28px; }
-.dt-card-head .dt-row-main { flex: 1 1 0; min-width: 64px; }
-.dt-card-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
 .dt-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .dt-rows-item { display: grid; grid-template-columns: repeat(var(--dt-columns), minmax(0, 1fr)) auto; gap: 8px; align-items: center; }
@@ -150,7 +146,6 @@ div.dt-preview-head { color: var(--dsw-alias-label-secondary); }
 .dt-legend .dt-dot { margin-top: 0; }
 .dt-savebar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 12px 0; background: var(--dsw-alias-bg-base, var(--dsw-alias-bg-layer-1)); border-top: 0.5px solid var(--dsw-alias-border-l2); }
 .dt-savebar .dt-hint { margin-right: auto; }
-.dt-card > .dt-savebar, .dt-block > .dt-savebar { margin: 0 -16px -16px; padding: 12px 16px; border-radius: 0 0 16px 16px; }
 .dt-glossary { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 20px; }
 .dt-glossary th, .dt-glossary td { text-align: left; padding: 6px 8px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); vertical-align: top; }
 .dt-glossary th { color: var(--dsw-alias-label-tertiary); font-weight: 400; }
@@ -273,7 +268,6 @@ div.dt-preview-head { color: var(--dsw-alias-label-secondary); }
 .dt-status-line .dt-status-text { margin-left: 0; }
 .dt-status-text[data-state='warning'] { color: var(--dsw-alias-state-warn-primary); }
 .dt-status-text[data-state='error'] { color: var(--dsw-alias-state-error-primary); }
-.dt-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dt-lv { white-space: nowrap; }
 .dt-lv-label { color: var(--dsw-alias-label-caption); }
 .dt-lv-value { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
@@ -351,7 +345,6 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-trigger-link:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dt-trigger-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .dt-kv-stack { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.dt-banner-actions { margin-top: 6px; }
 @container (max-width: 640px) {
   .dt-list > .dt-ticket { grid-template-columns: 1fr; row-gap: 4px; }
   .dt-ticket-stage { border-right: 0; }

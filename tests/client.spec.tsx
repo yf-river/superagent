@@ -60,9 +60,9 @@ afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear() })
 
 it('registers a localized main panel, sidebar entry and Plugin Manager row page, and no settings section', () => {
   const { ctx, entries, dictionaries, main, nav } = fixture([])
-  expect(ctx.plugin).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'superagent-preset-visibility' }))
-  expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'plugins.row.config'])
-  expect(entries[2]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
+  expect(ctx.plugin).toHaveBeenCalledWith(expect.objectContaining({ name: 'superagent-preset-visibility' }))
+  expect(entries.map(entry => entry.options.name)).toEqual(['conversation.session.header.actions', 'conversation.hero.options', 'main', 'sidebar.panellist', 'plugins.row.config'])
+  expect(entries[4]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
   expect(Object.keys(dictionaries)).toEqual(['dshSuperagent'])
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })

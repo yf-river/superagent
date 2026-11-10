@@ -99,13 +99,7 @@ it('shows save and discard only while a settings block has edits, at the end of 
   await click(save)
   expect(all('.dt-savebar')).toHaveLength(0)
   expect(document.activeElement).toBe(workers.form)
-  await click(find(zh['term.source'], '.dt-settings-link'))
-  expect(all('.dt-savebar')).toHaveLength(0)
-  const github = all('.dt-card').find(card => card.querySelector('.dt-card-title')?.textContent === 'GitHub')!
-  await type(field<HTMLInputElement>('智能体的 GitHub CLI'), 'gh-other')
-  expect(github.lastElementChild!.classList.contains('dt-savebar')).toBe(true)
-  // The agent CLI is read by setup, so the bar warns that saving restarts dsh-superagent and interrupts running work.
-  expect(github.lastElementChild!.textContent).toContain('2 个进行中的派工会中断')
+
 })
 
 it('gives the focus back to the field that had it once a block\'s save ends', async () => {
@@ -128,9 +122,9 @@ it('lists the settings groups stages first, opens each stage\'s group from its s
   async () => {
   await mount()
   await click(tab(zh['tab.settings']))
-  expect(all('.dt-settings-link').map(link => link.textContent)).toEqual(['来源', '评估', '执行', '提示词', '部署'])
-  expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['term.source'])
-  for (const [tab, group] of [['来源', '来源'], ['评估', '评估'], ['执行', '执行']] as const) {
+  expect(all('.dt-settings-link').map(link => link.textContent)).toEqual(['评估', '执行', '提示词', '部署'])
+  expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(zh['tab.eval'])
+  for (const [tab, group] of [['评估', '评估'], ['执行', '执行']] as const) {
     await click(find(tab, '[role="tab"]'))
     await click(find(zh['tab.settings'], '.dt-status-head button'))
     expect(document.querySelector('.dt-settings-link[aria-current="page"]')?.textContent).toBe(group)

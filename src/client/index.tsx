@@ -1,4 +1,4 @@
-import { TaskPanel } from './tasks.tsx'
+import { TaskPanel, TaskConversation } from './tasks.tsx'
 import { Button } from './controls.tsx'
 import { connectionTransport } from './task-api.ts'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
@@ -19,6 +19,7 @@ import { App } from './app.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
 import type { T } from './text.ts'
+import * as Chrome from './chrome.tsx'
 import * as PresetVisibility from './preset-visibility.ts'
 
 type ClientContext = Context & { sessions: ISessions; connection: ConnectionHandle }
@@ -35,6 +36,7 @@ function HammerIcon({ size }: SidebarPanelIconOwnerProps) {
 /** Mounted panel wrapper; cancels any pending Session navigation when a new one starts or the panel unmounts. */
 function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
   const [advanced,setAdvanced]=useState(false)
+  useEffect(()=>{const back=()=>setAdvanced(false);window.addEventListener('superagent:board',back);return()=>window.removeEventListener('superagent:board',back)},[])
   const transport=useMemo(()=>connectionTransport(ctx.connection.rpc),[ctx])
   const pending = useRef<AbortController>(undefined)
   useEffect(() => () => { pending.current?.abort() }, [])
@@ -57,6 +59,13 @@ export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace', 'connection
 /** Registers the panel, sidebar icon, and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
 export function apply(ctx: ClientContext): void {
   ctx.plugin(PresetVisibility)
+  ctx.plugin(Chrome)
+  const taskTransport = connectionTransport(ctx.connection.rpc)
+  const taskConversation = (placement: 'hero' | 'header') => (props: { sessionId?: string }) => <TaskConversation placement={placement} sessionId={props.sessionId} t={ctx.locale.bind(NS)} transport={taskTransport} back={()=>{ctx.layout.selectPanel(PANEL_ID);window.dispatchEvent(new Event('superagent:board'))}}/>
+  for (const name of ['conversation.session.header.actions', 'conversation.hero.options']) {
+    const slots = ctx.slots as { inject(name:string, setup:()=>()=>void):()=>void; register(options:{name:string;id:string;order:number}, component:unknown):()=>void }
+    slots.inject(name,()=>slots.register({name,id:'superagent-task',order:-100},taskConversation(name==='conversation.hero.options'?'hero':'header')))
+  }
   ctx.effect(()=>{
     const open=()=>{if(/^#superagent\/tasks\/[a-f0-9-]{36}$/.test(window.location.hash)) ctx.layout.selectPanel(PANEL_ID)}
     window.addEventListener('hashchange',open)

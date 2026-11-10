@@ -5,8 +5,6 @@ import type { Reason } from './reasons.ts'
 export interface ActorRef { source: string; id: string }
 /** Thread identity; the rule that derives `id` from a native event belongs to the source. */
 export interface ThreadRef { source: string; id: string }
-/** Write-only address on a thread; the address format belongs to the source. */
-export interface ChannelRef { source: string; thread: string; address: Record<string, string> }
 
 /** Stable key of a thread across the whole domain. */
 export const threadKey = (ref: ThreadRef): string => `${ref.source}:${ref.id}`
@@ -32,7 +30,6 @@ export interface Trigger {
   addressed?: 'mention' | 'direct'
   at: string
   text: string
-  channel?: ChannelRef
   url?: string
   /** Source-native details for adapters; the core never interprets them. */
   meta: Record<string, unknown>
@@ -175,7 +172,7 @@ export interface Thread {
   /** How many Evals of its queued Triggers expired in a row, each of which queued them again; a Decision clears it. */
   expired?: number
   /**
-   * Source-native attributes needed by channels or readers (for example a Feishu thread id). Its Source may also describe
+   * Source-native attributes used by context readers. Its Source may also describe
    * the thread for people: `label`, a display name, and `facts`, a {@link ThreadFacts} map.
    */
   meta: Record<string, unknown>
@@ -273,14 +270,12 @@ export type TicketEndBy = 'executor' | 'human'
 export type TicketOutcome = 'completed' | 'merged' | 'closed' | 'dropped' | 'stopped'
 /** A question for a person; `triggerId` is the human message that raised it, whose conversation it goes back to. */
 export interface Attention { id: string; question: string; triggerId?: string }
-/** Ticket aggregate: an authorized work item with its assignments, channels, thread bindings, and inputs. */
+/** Ticket aggregate: an authorized work item with its assignments, thread bindings, and inputs. */
 export interface Ticket {
   id: string
   title: string
   decisionId: string
   mandate: Mandate
-  /** The Channels of the messages it was accepted from, which its replies go to. */
-  channels: ChannelRef[]
   /** When, by whom, and how the ticket ended, with a person's or the host's reason beyond the outcome; an open ticket has none. */
   ended?: { at: string; by: TicketEndBy; outcome: TicketOutcome; reason?: string }
   /** Open question for a person; cleared by the executor or when the ticket ends. */
@@ -313,7 +308,7 @@ export interface Ticket {
  */
 export interface Follow { thread: string; own: boolean; closed?: { at: string; outcome: 'merged' | 'closed' } }
 export interface Execution {
-  name: string; directory: string; assignment: string
+  name: string; directory: string; assignment: string; sessionId?: string
   /** 本地任务首次分派的目录选择；重试与恢复沿用。 */
   local?: { strategy: 'shared' | 'worktree'; projectDirectory: string; reason: string; branch?: string; baseCommit?: string }
 }

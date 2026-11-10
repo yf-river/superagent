@@ -1,7 +1,7 @@
-/** SourceKind plugin contract: configuration schema, UI form fields, policy integration, channel adapter, and thread context reader. */
+/** SourceKind plugin contract: configuration schema, UI form fields, policy integration, and thread context reader. */
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { z } from 'zod'
-import type { OutboundMessage, ScopeResult, Trigger } from '../core/index.ts'
+import type { ScopeResult, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
 import type { Commands } from '../infra/commands.ts'
 import type { SourceContext, SourceHost } from './host.ts'
@@ -38,21 +38,6 @@ export interface SourcePolicyPart<P extends Record<string, unknown>> {
   rows?(config: Record<string, unknown>): AdmissionRowView[]
   /** Optional external roster sync (such as chat members); `ready` reports whether `part` names a target to refresh from. */
   sync?: { label: Localized; ready(part: P): boolean; run(host: SourceHost, part: P, signal: AbortSignal): Promise<P> }
-}
-/** UI link for a channel address; `triggerId` names the Trigger whose own deep link is preferred when available. */
-export interface ChannelLink { url: string; label: Localized; triggerId?: string }
-export type ChannelLinks = Partial<Pick<Deployment, 'repository' | 'feishu'>>
-/** Outbound messaging adapter for a source kind's threads. */
-export interface SourceChannel<C> {
-  /** Whether a reply may still go to `address`; without it, every address may receive replies. */
-  allowed?(address: Record<string, string>, config: C): boolean
-  /**
-   * Sends a message idempotently by ID; returns `'gone'` when the target conversation no longer accepts replies.
-   * @throws when delivery failed but may succeed on a later retry.
-   */
-  send(host: Pick<SourceContext, 'commands'>, message: OutboundMessage): Promise<'sent' | 'gone'>
-  /** Returns the URL and label for `address`; `url` is empty when `links` lack the required deployment info. */
-  link(address: Record<string, string>, links: ChannelLinks): ChannelLink
 }
 /** Normalized message returned by thread context readers; `bot` marks a non-human sender whose message can never authorize work on its own (at most an inferred candidate). */
 export interface ContextMessage {
@@ -96,8 +81,6 @@ export interface SourceKind<C extends Record<string, unknown> = Record<string, u
   health: string[]
   /** Listening rule for a trigger (or recorded Mandate basis) of this kind; kinds without `scope` listen to everything they produce and observe none of it. */
   scope?(input: { meta: Record<string, unknown> }, config: C): ScopeResult
-  /** Outbound reply adapter; kinds without `channel` produce no replies or channel checks. */
-  channel?: SourceChannel<C>
   /** Bounded context reader for assessments; assessments of a kind without `threadContext` read none. */
   threadContext?: ThreadContext<C>
   /** Maps a search query to candidate Thread keys (such as `github:12`) and Trigger search terms (such as a Feishu `om_` ID). */

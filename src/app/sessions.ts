@@ -14,7 +14,6 @@ import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
 import { RetryHealth } from './retry-health.ts'
 import { initializeRoleModel, resolveRoleModel } from './role-models.ts'
-import { bundledSkills } from './skill-files.ts'
 import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
@@ -43,7 +42,8 @@ export interface SessionsHost {
  * What Sessions registered for an agent it decorated: the releases of its prompt section, tools and skill scope, the scope
  * its skills are registered in, and the skills of one prompt revision; for a worker's subagent, only its tool limits.
  */
-interface SessionBinding { disposers: (() => void)[]; scope?: Context; skills?: { revision: number; dispose: () => void }; subagent?: true }
+interface SessionBinding {
+  ticketId?: string; disposers: (() => void)[]; scope?: Context; skills?: { revision: number; dispose: () => void }; subagent?: true }
 
 /** The agent presets Executor Sessions and the main Session are created with, which the bundle's patch defines. */
 export const WORKER_PRESET = 'dsh-superagent-worker', ROUTER_PRESET = 'dsh-superagent-router'
@@ -125,7 +125,7 @@ export class Sessions {
     ctx.inject(['agentPresets'], child => {
       child.on('agent-preset/selected', (sessionId, preset) => {
         const ticketId = ticketOfSession(sessionId), agent = ctx.agents.get(sessionId as SessionId)
-        const ours = sessionId === this.host.masterId ? ROUTER_PRESET : ticketId && this.host.store.tickets.get(ticketId) ? WORKER_PRESET : undefined
+        const ours = sessionId === this.host.masterId ? ROUTER_PRESET : ticketId && this.host.store.tickets.get(ticketId) && !this.host.store.tickets.get(ticketId)?.execution?.sessionId ? WORKER_PRESET : undefined
         if (!ours || preset === ours || !agent) return
         const presets = child.get('agentPresets') as { select(agent: Agent, preset: string): Promise<string> }
         presets.select(agent, ours).catch(() => {})
@@ -136,23 +136,26 @@ export class Sessions {
     })
   }
   /** Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`. */
-  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
+  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker' | 'task'): Promise<Agent> {
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
-    if ('error' in result && result.error.code === 'session/not-found') {
+    const taskSession = id.startsWith('task-') || this.host.store.tickets.list().some(ticket => ticket.execution?.sessionId === id)
+    const creating = 'error' in result && result.error.code === 'session/not-found'
+    if (creating) {
       const workspace = await ctx.workspaceRegistry.create(cwd)
       // A Session keeps the preset it was created with, one of the bundle's own (cordis.patch.yml).
       await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
-        agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
+        agentPreset: role === 'task' ? 'standard' : role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
       result = await ctx.sessionController.resolveAgent(id as SessionId)
     }
     if ('error' in result) throw result.error
     const settings = this.host.store.settings()
-    await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
+    if (role !== 'task' && !taskSession) await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
     if(role==='orchestrator') this.host.store.set(KV.sessions.roleModel(id),JSON.stringify(settings.eval.model))
+    if (taskSession) { const ticket = this.ticketOf(result.agent); if (this.bindings.get(result.agent)?.ticketId !== ticket?.id) this.release(result.agent) }
     await this.decorate(result.agent)
-    ctx.permissionPresets.set(result.agent.session, 'danger-full-access')
-    await ctx.sessionController.rename({ sessionId: id as SessionId, title })
+    if (creating || !taskSession) ctx.permissionPresets.set(result.agent.session, 'danger-full-access')
+    if (creating || !taskSession) await ctx.sessionController.rename({ sessionId: id as SessionId, title })
     return result.agent
   }
   /** Returns whether `sessionId` already holds the message delivered under `requestId`, or `false` if the session does not exist. */
@@ -161,7 +164,7 @@ export class Sessions {
     return !('error' in result) && await this.agentDelivery.holds(result.agent, key(requestId))
   }
   /** Deliver a message once per request id: to the next turn, the current one, or `inject`ed with its label without waking the agent. */
-  async prompt(sessionId: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }, authorize?: () => void,
+  async prompt(sessionId: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string; fullMessage?: boolean }, authorize?: () => void,
     accepted?: () => void, content: readonly ContentBlock[] = []): Promise<void> {
     const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)
     if ('error' in result) throw result.error
@@ -235,7 +238,7 @@ export class Sessions {
       : { state: 'ready', detail: 'No managed Session is waiting on a model budget retry' })
   }
   private ticketOf(agent: Agent): Ticket | undefined {
-    const ticketId = ticketOfSession(agent.id)
+    const ticketId = ticketOfSession(agent.id, this.host.store.tickets)
     return ticketId === undefined ? undefined : this.host.store.tickets.get(ticketId)
   }
   private async decorate(agent: Agent): Promise<void> {
@@ -244,7 +247,7 @@ export class Sessions {
     const master = agent.id === host.masterId
     const ticket = master ? undefined : this.ticketOf(agent)
     if (!master && !ticket) { this.limitSubagent(agent); return }
-    const binding: SessionBinding = { disposers: [] }
+    const binding: SessionBinding = { disposers: [], ...(ticket ? { ticketId: ticket.id } : {}) }
     this.bindings.set(agent, binding)
     this.retryHealth.restore(agent.id, agent.session.snapshotEvents())
     if (agent.status === 'idle') this.retryHealth.clear(agent.id)
@@ -273,7 +276,7 @@ export class Sessions {
         agent.ctx.tools.guard(execution => noWait(execution, () => this.routed(agent))))
     } else {
       // An Executor Session keeps the profile's work tools it has, which DSH requires to be known; its own tools are not masked.
-      binding.disposers.push(...this.workOnly(agent, ticket!.id))
+      if (!ticket!.execution?.sessionId) binding.disposers.push(...this.workOnly(agent, ticket!.id))
     }
   }
   /**
@@ -312,10 +315,10 @@ export class Sessions {
   private limitSubagent(agent: Agent): void {
     let parent = agent.session.header.parentSession
     // Up the subagents' parents to the worker, which are loaded while their subagents run.
-    for (let depth = 0; parent !== undefined && ticketOfSession(parent) === undefined && depth < 8; depth++) {
+    for (let depth = 0; parent !== undefined && ticketOfSession(parent, this.host.store.tickets) === undefined && depth < 8; depth++) {
       parent = this.ctx.agents.get(parent)?.session.header.parentSession
     }
-    const ticketId = parent === undefined ? undefined : ticketOfSession(parent)
+    const ticketId = parent === undefined ? undefined : ticketOfSession(parent, this.host.store.tickets)
     if (ticketId === undefined || !this.host.store.tickets.get(ticketId)) return
     this.bindings.set(agent, { disposers: this.workOnly(agent, ticketId), subagent: true })
   }
@@ -326,12 +329,9 @@ export class Sessions {
     previous?.dispose()
     const disposers: (() => void)[] = []
     for (const [name, content] of this.host.prompts.skills(version.config)) {
-      if (this.host.localMode?.() && (name === 'github' || name === 'feishu')) continue
-      const bundled = name === 'feishu' || name === 'github' ? bundledSkills[name] : undefined
       const body = version.config.skills[name] ?? ''
-      const description = bundled?.description ?? (body.replace(/\s+/g, ' ').slice(0, 120) || 'Custom dsh-superagent operational skill.')
-      disposers.push(scope.skills.register({ name: `${SKILL_PREFIX}${name}`, description, content, source: 'runtime',
-        ...(bundled ? { resourceBase: { kind: 'directory' as const, path: dirname(bundled.path) } } : {}) }))
+      const description = (body.replace(/\s+/g, ' ').slice(0, 120) || 'Custom dsh-superagent operational skill.')
+      disposers.push(scope.skills.register({ name: `${SKILL_PREFIX}${name}`, description, content, source: 'runtime' }))
     }
     binding.skills = { revision: version.revision, dispose: () => { disposers.forEach(dispose => dispose()) } }
   }

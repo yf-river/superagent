@@ -64,33 +64,7 @@ it('merges a Deployment draft into the values another page saved meanwhile, and 
   expect(shared.getSnapshot().value).toMatchObject({ admissionContextMaxPages: 20, promptMaxChars: 50000 })
 })
 
-it('renders the Deployment page with the derived accounts in the Plugin Manager, and no summary', async () => {
-  let container = document.createElement('div')
-  let root = createRoot(container)
-  onTestFinished(() => { act(() => { root.unmount() }); container.remove() })
-  // Remount from scratch on each render to match Plugin Manager page navigation.
-  const render = async (view: 'page' | 'summary') => {
-    act(() => { root.unmount() }); container.remove()
-    container = document.createElement('div'); document.body.append(container)
-    root = createRoot(container)
-    const form = server.form
-    await act(async () => { root.render(<PluginConfig t={translator(zh)} view={view} form={form && { state: form.getSnapshot(),
-      mutate: form.mutate }} />) })
-    await settle()
-  }
-  await render('summary')
-  expect(container.textContent).toBe('')
-  server.form = fakeForm().form
-  await render('page')
-  for (const fact of ['acme/widgets', '@agent-bot', 'Widgets Bot', '账号在 dsh-superagent 面板的来源设置里修改。']) expect(text()).toContain(fact)
-  server.setup = { ...server.setup, problem: problemOf('repositoryUnset'), accounts: null }
-  await render('page')
-  expect(text()).toContain('部署检查未通过：GitHub 来源没有设置监听的仓库。')
-  expect(field<HTMLInputElement>(zh.deploymentPromptMaxChars).disabled).toBe(false)
-  server.down = true
-  await render('page')
-  expect(text()).toContain(zh.hostNotRunning)
-})
+
 
 it('tells a dsh-superagent that is starting from a browser that cannot write on the Deployment page', async () => {
   const { form: shared, publish } = fakeForm()
@@ -112,18 +86,18 @@ it('tells a dsh-superagent that is starting from a browser that cannot write on 
 it('reads the state every second after a setup check, until dsh-superagent stopped answering and answers again', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   onTestFinished(() => { vi.useRealTimers() })
-  server.setup = { ...server.setup, problem: problemOf('agentCliUnset'), accounts: null }
+  server.setup = { ...server.setup, problem: problemOf('environmentFailed') }
   at({ page: 'settings', query: { group: 'deployment' } })
   await mount()
   await click(zh.setupCheck)
   const second = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(1000) }); await settle() }
   server.down = true
   await second()
-  expect(text()).toContain(zh['setup.agentCliUnset'])
+  expect(text()).toContain(zh['setup.environmentFailed'])
   server.down = false
   server.setup = { ...server.setup, problem: null }
   await second()
-  expect(text()).not.toContain(zh['setup.agentCliUnset'])
+  expect(text()).not.toContain(zh['setup.environmentFailed'])
   // Once it answers, the state is read every five seconds again.
   const reads = server.requests.filter(request => request.path === 'state').length
   await act(async () => { await vi.advanceTimersByTimeAsync(3000) }); await settle()
@@ -133,7 +107,7 @@ it('reads the state every second after a setup check, until dsh-superagent stopp
 it('ends a restart that never stopped answering after half a minute, and reads the state every five seconds again', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   onTestFinished(() => { vi.useRealTimers() })
-  server.setup = { ...server.setup, problem: problemOf('agentCliUnset'), accounts: null }
+  server.setup = { ...server.setup, problem: problemOf('environmentFailed') }
   at({ page: 'settings', query: { group: 'deployment' } })
   await mount()
   await click(zh.setupCheck)

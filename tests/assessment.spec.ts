@@ -8,7 +8,7 @@ import type { Commands } from '../src/infra/commands.ts'
 import { SettingsSchema } from '../src/policy.ts'
 import { testDeployment } from './fixtures/deployment.ts'
 import { deferred } from './fixtures/async.ts'
-import { githubKind } from '../src/sources/github.ts'
+import { githubKind } from './fixtures/sources.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 
 /** Assessor fixture backed by in-memory repositories and fake GitHub Issue and file reads. */
@@ -47,7 +47,7 @@ function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.fr
   const executor: Executor = { start: async () => {}, deliver: async () => {}, stop: async () => {} }
   const scope = { scope: () => ({ listened: true as const, observed: true }) }
   const outbox = { send: () => {}, status: () => undefined, withdraw: () => {} }
-  engine = new Engine({ repo, policy: () => policy, scope, assessor, executor, outbox })
+  engine = new Engine({ repo, policy: () => policy, scope, assessor, executor, })
   const tools: Record<string, (args: unknown, signal: AbortSignal) => Promise<unknown>> = {}
   tools.orchestrator_eval_read = (args, signal) => assessor.read({} as Agent, EvalReadSchema.parse(args), signal)
   tools.orchestrator_eval_decide = (args, signal) => {
@@ -68,7 +68,7 @@ it('keeps nothing for an Eval once it is decided, as for one that timed out', as
   for (let n = 1; n <= 3; n++) {
     s.engine.receive(issue(n)); s.engine.evaluateDue()
     await s.assessor.context(`issue-${n}`, signal)
-    await s.tools.orchestrator_eval_read!({ trigger_id: `issue-${n}`, resource: 'file', path: 'src/value.ts', offset: 0 }, signal)
+    await s.tools.orchestrator_eval_read!({ trigger_id: `issue-${n}`, resource: 'message', offset: 0 }, signal)
     expect(s.size()).toBeGreaterThan(0)
     s.engine.decide(`issue-${n}`, { kind: 'ignore', reason: 'not a request' })
     expect(s.size()).toBe(0)
@@ -81,36 +81,9 @@ it('keeps nothing for an Eval once it is decided, as for one that timed out', as
   expect(s.size()).toBe(0)
 })
 
-it('keeps nothing from a context read that finishes after its Eval was decided', async () => {
-  const s = setup()
-  const hold = deferred()
-  s.gate.issue = hold.promise
-  s.engine.receive(issue(1)); s.engine.evaluateDue()
-  const details = s.assessor.context('issue-1', signal)
-  s.engine.decide('issue-1', { kind: 'ignore', reason: 'not a request' })
-  hold.resolve()
-  await expect(details).rejects.toThrow('This assessment has finished')
-  expect(s.size()).toBe(0)
-})
 
-it('reads the context of a Trigger through its Source, and none for a Source that gives none', async () => {
-  const s = setup()
-  s.engine.receive(issue(1)); s.engine.evaluateDue()
-  const context = await s.assessor.context('issue-1', signal)
-  expect(context.thread).toMatchObject({ complete: true, loaded_messages: 6, source_found: true })
-  const page = await s.tools.orchestrator_eval_read!({ trigger_id: 'issue-1', resource: 'thread', offset: 0 }, signal) as { text: string }
-  expect(JSON.parse(page.text)).toMatchObject({ next_read: null,
-    messages: expect.arrayContaining([expect.objectContaining({ text: 'comment 0' })]) })
-  const other: Trigger = { ...issue(2), id: 'other-2', source: 'probe', threads: [{ source: 'probe', id: '2' }], actor: { source: 'probe',
-    id: 'bob' } }
-  s.engine.receive(other); s.engine.evaluateDue()
-  expect((await s.assessor.context('other-2', signal)).thread).toMatchObject({ error: expect.stringContaining('gives no Thread context') })
-  await expect(s.tools.orchestrator_eval_read!({ trigger_id: 'other-2', resource: 'thread', offset: 0 },
-    signal)).rejects.toThrow('gives no Thread context')
-  // The Trigger's own text is still readable when its Source provides no Thread context.
-  expect(await s.tools.orchestrator_eval_read!({ trigger_id: 'other-2', resource: 'message', offset: 0 },
-    signal)).toMatchObject({ text: 'issue 2' })
-})
+
+
 it('routes an explicit candidate instead of assessing it: each eval tool names the routing tools', async () => {
   const s = setup('explicit')
   s.engine.receive(issue(1)); s.engine.evaluateDue()
@@ -131,31 +104,7 @@ it('asks the assessment only for decisions its tool accepts, which no longer inc
   expect(result('ignore', { ticket_id: 't' })).toBe(false)
 })
 
-it('loads a window without the assessment instructions: the trigger once, cut messages with their length, and stubs for the rest',
-  async () => {
-  const bodies = Array.from({ length: 30 }, (_, i) => `comment ${i}: ${'the label reads oddly on the settings page. '.repeat(i % 4 === 0
-    ? 40 : 3)}`)
-  const s = setup('inferred', bodies)
-  const trigger = { ...issue(1), id: 'c15', text: bodies[15]!, url: 'https://github.com/acme/widgets/issues/1#c15', meta: { number: 1,
-    kind: 'comment' } }
-  s.engine.receive(trigger); s.engine.evaluateDue()
-  const result = await s.assessor.context('c15', signal) as Record<string, unknown> & { thread: { messages: Record<string, unknown>[] } }
-  expect(result).not.toHaveProperty('instructions')
-  expect(result.text).toBe(bodies[15])
-  const messages = new Map(result.thread.messages.map(message => [message.id as string, message]))
-  const at = (i: number) => messages.get(`https://github.com/acme/widgets/issues/1#c${i}`)!
-  // The trigger's own text is given once at top level; its two nearest neighbours keep more text than the rest of the window.
-  expect(at(15)).toEqual({ id: expect.any(String), from: 'bob', at: expect.any(String), trigger: true })
-  expect(at(16)).toMatchObject({ chars: bodies[16]!.length, text: `${bodies[16]!.slice(0, 1200)}…` })
-  expect(at(12)).toMatchObject({ chars: bodies[12]!.length, text: `${bodies[12]!.slice(0, 400)}…` })
-  expect(at(14)).toMatchObject({ text: bodies[14] })
-  expect(at(14)).not.toHaveProperty('chars')
-  // Messages outside the window are stubs that orchestrator_eval_read can read in full.
-  expect(at(8)).toEqual({ id: expect.any(String), from: 'bob', preview: bodies[8]!.slice(0, 50) })
-  const whole = await s.tools.orchestrator_eval_read!({ trigger_id: 'c15', resource: 'message', message_id: at(8).id }, signal)
-  expect(JSON.stringify(whole)).toContain(bodies[8]!.slice(-40))
-  expect(JSON.stringify(result).length).toBeLessThan(9000)
-})
+
 
 it('lets the main Session read on from the cursor its loaded window ends with, and points a cut batch message at its whole text', async () => {
   // Every page returns a next cursor so the bounded window ends with a continuation cursor.

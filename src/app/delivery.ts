@@ -63,7 +63,7 @@ export class AgentDelivery {
     return (await this.history(agent)).ids.has(id) || [...agent.inbox.nextTurn, ...agent.inbox.nextStep].some(message => deliveryId(message) === id)
   }
   /** Delivers once to the selected inbox, or injects into history without waking the agent, and flushes Session persistence before acknowledging the producer. */
-  async send(agent: Agent, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }, signal: AbortSignal, authorize?: () => void,
+  async send(agent: Agent, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string; fullMessage?: boolean }, signal: AbortSignal, authorize?: () => void,
     accepted?: () => void, content: readonly ContentBlock[] = []): Promise<void> {
     signal.throwIfAborted()
     const seen = await this.history(agent)
@@ -73,7 +73,7 @@ export class AgentDelivery {
     const id = messageId(requestId)
     const pending = [...agent.inbox.nextTurn, ...agent.inbox.nextStep].some(message => deliveryId(message) === id)
     if (!seen.ids.has(id) && !pending) {
-      const source = typeof mode === 'object' ? { kind: 'dsh-superagent' as const, form: 'notice' as const, summary: mode.inject }
+      const source = typeof mode === 'object' && !mode.fullMessage ? { kind: 'dsh-superagent' as const, form: 'notice' as const, summary: mode.inject }
         : { kind: 'dsh-superagent' as const, form: 'relay' as const }
       const message = freezeMessage({ id, role: 'user' as const, content: [{ type: 'text' as const, text }, ...content], source })
       if (typeof mode === 'object') { agent.inject(message); seen.ids.add(id) }

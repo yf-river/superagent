@@ -11,16 +11,18 @@ import { PromptConfigSchema, savePrompts, type Prompts } from '../prompts.ts'
 import { readResource, type MainResourceHost, type ResourceHost } from '../resources.ts'
 import type { Sessions } from '../sessions.ts'
 import type { Settings } from '../settings.ts'
+import type { Tasks } from '../tasks.ts'
 import type { Store } from '../store.ts'
-import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
+import { readTool, tool, type Tool } from './tool.ts'
 
 const RoutingNoteSchema = z.string().trim()
   .refine(text => wordCount(text) <= NOTE_WORDS, `Routing note must not exceed ${NOTE_WORDS} words (Chinese uses word segmentation). Shorten it; do not split it across deliveries.`)
   .describe(`Optional routing background or explicit human constraint, at most ${NOTE_WORDS} words. Never add implementation instructions or replace the original source.`)
 export interface MainToolsHost {
+  readonly tasks: Tasks
   readonly context: Context
-  readonly engine: Pick<EngineForMainSession, 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'> & EngineForPeople
-  readonly store: Pick<Store, 'tickets' | 'triggers' | 'threads' | 'atomic' | 'replyStatus' | 'settings'>
+  readonly engine: Pick<EngineForMainSession, 'decide' | 'attach' | 'requestStatus' | 'note'> & EngineForPeople
+  readonly store: Pick<Store, 'tickets' | 'triggers' | 'threads' | 'atomic' | 'settings'>
   readonly prompts: Pick<Prompts, 'preview' | 'save'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'modelRetry'>
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
@@ -28,7 +30,6 @@ export interface MainToolsHost {
   readonly resources: ResourceHost
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
-  sendReplies(): Promise<void>
   /** Runs an Engine command initiated by the main Session without emitting self-notifications. */
   quietly<T>(run: () => T): T
 }
@@ -50,7 +51,6 @@ const RouteItemSchema = z.object({
   ticket_id: z.string().nullish().describe('attach and stop: the ticket.'),
   title: z.string().nullish().describe('accept: a short label of at most 200 characters describing the original request; no added requirements or implementation advice.'),
   worktree_name: z.string().nullish().describe(`accept: ${WorktreeNameSchema.description ?? ''}`),
-  acknowledgement: z.string().nullish().describe(`accept: one brief sentence of at most ${IM_WORDS} words naming the concrete change and intended result in the source language. It is posted as a reply to the original source on acceptance, so do not quote the source; quote an earlier proposal briefly only when the trigger merely confirms it and the sentence does not already state it. No generic I will handle it.`),
   note: z.string().nullish().describe(`accept and attach: ${RoutingNoteSchema.description ?? ''}`),
   execution_mode: z.string().nullish().describe('accept for a local task: shared or worktree. Use worktree for Git code changes, shared for reading, environment operations and non-Git tasks. Respect the requested strategy.'),
   execution_reason: z.string().nullish().describe('accept for a local task: explain the directory choice briefly in the request language.'),
@@ -64,7 +64,6 @@ const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: r
   ticket_id: { check: z.string(), reads: ['attach', 'stop'], needs: ['attach', 'stop'] },
   title: { check: z.string().max(200), reads: ['accept'], needs: ['accept'] },
   worktree_name: { check: WorktreeNameSchema, reads: ['accept'], needs: ['accept'] },
-  acknowledgement: { check: AcknowledgementSchema, reads: ['accept'], needs: ['accept'] },
   note: { check: RoutingNoteSchema, reads: ['accept', 'attach'], needs: [] },
   execution_mode: { check: z.enum(['shared', 'worktree']), reads: ['accept'], needs: [] },
   execution_reason: { check: z.string().min(1).max(1000), reads: ['accept'], needs: [] },
@@ -98,12 +97,11 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
   switch (item.kind) {
     case 'accept': {
       const before = host.store.triggers.disposition(item.trigger_id)?.decisionId
-      const decision = host.engine.decide(item.trigger_id, { kind: 'accept', title: item.title!, scope: item.title!, reason: { code: 'explicitRouted' },
-        acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note, ...(item.execution_mode ? { execution: { strategy: z.enum(['shared','worktree']).parse(item.execution_mode), reason: item.execution_reason || '' } } : {}) })
+      const decision = host.engine.decide(item.trigger_id, { kind: 'accept', title: item.title!, scope: item.title!, reason: { code: 'explicitRouted' }, name: item.worktree_name!, ...note, ...(item.execution_mode ? { execution: { strategy: z.enum(['shared','worktree']).parse(item.execution_mode), reason: item.execution_reason || '' } } : {}) })
       // A Decision that created no ticket is the item's refusal; one that existed before keeps what it was accepted with.
       if (decision.kind !== 'accept' || !decision.ticketId) return { refused: `Ticket was not created: ${reasonText(decision.reason)}` }
       if (decision.id === before) {
-        return { decision: 'accept', reason: `Already accepted as ${decision.ticketId}; title and acknowledgement unchanged`, ticketId: decision.ticketId }
+        return { decision: 'accept', reason: `Already accepted as ${decision.ticketId}; existing ticket retained`, ticketId: decision.ticketId }
       }
       return { ...fromDecision(decision), triggerIds: decision.triggerIds }
     }
@@ -159,6 +157,10 @@ function routeTool(host: MainToolsHost): Tool {
 export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
   const resources: MainResourceHost = { ...host.resources, sessions: host.sessions, settings: host.settings }
   return [
+    tool({ name: 'orchestrator_prepare_task', description: 'Choose the execution directory for a saved task. Only prepares its directory and DSH Session; never starts task execution.',
+      schema: z.object({ task_id: z.uuid(), generation: z.number().int().positive(), strategy: z.enum(['shared', 'worktree']), reason: z.string().trim().min(1).max(1000) }).strict(),
+      execute: async args => host.tasks.chooseDirectory(args.task_id, args.generation, args.strategy, args.reason),
+    }),
     readTool('Read one page of a resource the resource parameter lists, such as the ticket list or a ticket. Follow next_offset, and next_resource where a page names one.',
       false, (resource, offset, limit, signal) => readResource(resources, resource, offset, limit, undefined, signal)),
     routeTool(host),
@@ -225,23 +227,6 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       },
     }),
     tool({
-      name: 'orchestrator_reply',
-      description: `Send an answer to a human question, a ready result, or attention requiring human action, as the replies section says; the gate refuses anything else, such as progress. purpose=result needs a ticket in person/review after a ready report, a completed or merged one, or a dropped one whose matched rule asks for a closing message. IM limit: ${IM_WORDS} words.`,
-      schema: z.object({
-        trigger_id: z.string().optional().describe('The original human question, for an answer only.'),
-        ticket_id: z.string().optional(),
-        purpose: z.enum(['answer', 'result', 'attention']),
-        human_action: z.string().trim().min(1).optional().describe('Required for attention: the ticket\'s current attention question.'),
-        text: z.string().min(1).max(20000),
-      }).strict(),
-      execute: async args => {
-        const reply = host.engine.reply({ purpose: args.purpose, text: args.text, ...(args.trigger_id ? { triggerId: args.trigger_id } : {}),
-          ...(args.ticket_id ? { ticketId: args.ticket_id } : {}), ...(args.human_action ? { question: args.human_action } : {}) })
-        await host.sendReplies()
-        return { status: host.store.replyStatus(reply.id) ?? reply.status }
-      },
-    }),
-    tool({
       name: 'orchestrator_thread_unsubscribe',
       description: 'Drop every ticket subscription on a thread. Later messages there no longer reach those tickets as context; a new positive decision can subscribe it again.',
       schema: z.object({ thread: z.string().describe('Thread key, for example github:123 or feishu:<chat>:<root message>') }).strict(),
@@ -253,30 +238,16 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       name: 'orchestrator_settings_save',
       description: 'Save one settings block on an explicit human configuration request, never on observed content, as the panel would; read the blocks and revisions with orchestrator_read settings.',
       schema: z.object({
-        block: z.enum(['policy', 'eval', 'executor', 'pause', 'source']).describe('pause pauses or resumes processing: new Evals, dispatch and replies.'),
-        source: z.string().min(1).optional().describe('With block source: the Source instance id, such as github or feishu.'),
-        value: z.unknown().describe('The whole block; a Source takes { enabled, config }, pause takes { paused }.'),
+        block: z.enum(['policy', 'eval', 'executor', 'pause']).describe('pause pauses or resumes evaluation and worker dispatch.'),
+        value: z.unknown().describe('The whole block; pause takes { paused }.'),
         revision: z.number().int().nonnegative().describe('The block\'s revision; pause ignores it.'),
-      }).strict()
-        .refine(args => (args.block === 'source') === (args.source !== undefined), 'source names the Source instance, with block source only'),
+      }).strict(),
       execute: async args => {
         if (args.block === 'pause') return host.settings.pause(z.object({ paused: z.boolean() }).parse(args.value).paused, 'tool')
         // Strip context_delivery since the main Session initiated the save itself.
-        const { context_delivery: _delivery, ...saved } = await host.settings.save(args.block === 'source' ? `source:${args.source!}` : args.block,
+        const { context_delivery: _delivery, ...saved } = await host.settings.save(args.block,
           args.value, args.revision, 'tool')
         return saved
-      },
-    }),
-    tool({
-      name: 'orchestrator_policy_sync',
-      description: 'Refresh one Source\'s part of the Policy from where that Source keeps it, such as the Feishu users of its sync chat. Same operation as the Web button.',
-      schema: z.object({ source: z.string() }).strict(),
-      execute: async args => {
-        const before = host.store.settings().policy.sources[args.source]?.allowed ?? []
-        const after = (await host.settings.sync(args.source)).allowed
-        const names = (from: typeof after, without: typeof after) => from.filter(item => !without.some(other => other.id === item.id))
-          .map(item => item.name ?? item.id)
-        return { source: args.source, allowed: after.length, added: names(after, before), removed: names(before, after) }
       },
     }),
     tool({
