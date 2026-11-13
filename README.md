@@ -8,7 +8,7 @@ dsh-superagent provides a local task board for [DeepSeek Harness](https://www.de
 
 ## Use
 
-The **superagent** sidebar entry opens the board. Save a request with its server directory and optional attachments. Saving creates a Backlog task without starting Router or creating a conversation. Opening it asks Router to choose shared/worktree, prepares the directory, then opens the linked native DSH conversation. Opening does not execute the task. **Start task**, or dragging Backlog to In progress, begins execution. Questions appear in Needs attention; ready results await your acceptance. Chat, retries and reopened work reuse that conversation and directory.
+The **Tasks** sidebar entry opens the board. Save a request with its server directory and optional attachments. Saving creates a Backlog task without starting Router or creating a conversation. Opening it asks Router to choose shared/worktree, prepares the directory, then opens the linked native DSH conversation. Opening does not execute the task. **Start task**, or dragging Backlog to In progress, begins execution. Questions appear in Needs attention; ready results await your acceptance. Chat, retries and reopened work reuse that conversation and directory.
 
 The board supports directory filters, column visibility, per-column sorting, summaries and a list view. Tasks have no priority or deadline fields. Conversation controls replace the separate task detail page. Accepting a result does not merge, push or deploy it.
 
