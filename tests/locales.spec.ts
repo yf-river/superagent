@@ -12,6 +12,12 @@ it('names the same placeholders in both languages', () => {
   expect(keys.filter(key => !zh[key] || !en[key])).toEqual([])
 })
 
+it('names the board by what it holds, not by the plugin name, in the sidebar and the board header', () => {
+  // The sidebar entry and the board's own header are the two places a person reads the surface's name.
+  expect([zh.panel, en.panel, zh['task.heading'], en['task.heading']])
+    .not.toContain('superagent')
+})
+
 it('words a reason by its code with its values, each of a batch, and words a person or an assessor wrote as written', () => {
   const t = ((key: DshSuperagentKey, values: Record<string, string> = {}) => (zh[key] ?? key).replace(/\{(\w+)\}/g, (_match, name: string) => values[name] ?? '')) as T
   expect(reasonLabel(t, 'retried')).toBe(zh['reason.retried'])

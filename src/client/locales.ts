@@ -53,7 +53,7 @@ const TEXT = {
   'task.attention.failed': ['执行失败', 'Execution failed'],
   'task.attention.blocked': ['受到阻塞', 'Blocked'],
   'task.attention.waiting': ['等待处理', 'Waiting'],
-  "task.heading": ["superagent", "superagent"],
+  "task.heading": ["任务", "Tasks"],
   "task.subtitle": ["记录需求，交给 Agent 执行，由你验收。", "Capture requests, let agents work, and review the results."],
   "task.create": ["新建任务", "New task"],
   "task.edit": ["编辑任务", "Edit task"],
