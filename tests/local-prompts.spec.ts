@@ -8,7 +8,7 @@ const dispose:(()=>void)[]=[]
 afterEach(()=>dispose.splice(0).reverse().forEach(fn=>fn()))
 it('previews the local role instructions actually used, including saved team sections',()=>{
  const dir=mkdtempSync(join(tmpdir(),'local-prompts-')),store=new Store(join(dir,'db.sqlite'));dispose.push(()=>{store.close();rmSync(dir,{recursive:true,force:true})})
- const prompts=new Prompts(store,()=>100000,()=>[],()=>false,()=>true)
+ const prompts=new Prompts(store,()=>100000,()=>[],()=>true)
  expect(prompts.current().config).toEqual(defaultPrompts(true))
  const config={...prompts.current().config,scope:'Only modify the requested document.'}
  const preview=prompts.preview(config)

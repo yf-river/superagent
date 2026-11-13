@@ -100,8 +100,7 @@ export class Runtime extends Service implements SourceHost {
       const setup = this.setup = new Setup({ context: ctx, machine, lifetime: this.lifetime, restart })
       const deployed = () => setup.configured()
         ? environmentOf({ deployment: setup.deployment, sources: this.sources, settings: store.settings() }) : undefined
-      const feishu = () => false
-      const prompts = this.prompts = new Prompts(store, () => machine.promptMaxChars.get(), deployed, feishu, () => true)
+      const prompts = this.prompts = new Prompts(store, () => machine.promptMaxChars.get(), deployed, () => true)
       const savedRouter = store.get(KV.runtime.masterId)
       const masterId = this.masterId = savedRouter && savedRouter !== store.get<string>('master-id') ? savedRouter : `local-router-${key(machine.stateDir)}`
       store.set(KV.runtime.masterId, masterId)

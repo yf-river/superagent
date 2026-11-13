@@ -3,6 +3,7 @@ import type { EffectKind } from '../src/app/effects.ts'
 import { en, zh, type DshSuperagentKey } from '../src/client/locales.ts'
 import { reasonLabel, type T } from '../src/client/text.ts'
 import { REASONS, USER_ERRORS } from '../src/core/index.ts'
+import { localKind } from '../src/sources/local.ts'
 
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map(match => match[1]).sort()
 
@@ -12,10 +13,16 @@ it('names the same placeholders in both languages', () => {
   expect(keys.filter(key => !zh[key] || !en[key])).toEqual([])
 })
 
-it('names the board by what it holds, not by the plugin name, in the sidebar and the board header', () => {
-  // The sidebar entry and the board's own header are the two places a person reads the surface's name.
-  expect([zh.panel, en.panel, zh['task.heading'], en['task.heading']])
+it('names the surface by what it holds, not by the plugin name, everywhere a person reads its heading', () => {
+  // The sidebar entry, the board header and the settings-and-diagnostics header each name the surface.
+  expect([zh.panel, en.panel, zh['task.heading'], en['task.heading'], zh.title, en.title])
     .not.toContain('superagent')
+  expect([zh.panel, zh['task.heading'], zh.title]).toEqual(['任务', '任务', '任务'])
+})
+
+it('names every Source a row can carry, since a missing entry renders the raw id', () => {
+  // Views read a Source's name through `source.<id>`; an absent entry falls back to the bare id.
+  expect([localKind().kind].filter(kind => !(`source.${kind}` in zh) || !(`source.${kind}` in en))).toEqual([])
 })
 
 it('words a reason by its code with its values, each of a batch, and words a person or an assessor wrote as written', () => {

@@ -118,7 +118,7 @@ const TEXT = {
   "task.strategy.shared": ["原目录", "Project directory"],
   "task.strategy.worktree": ["独立 worktree", "Separate worktree"],
   // Shared
-  title: ['Superagent', 'Superagent'],
+  title: ['任务', 'Tasks'],
   close: ['关闭', 'Close'],
   cancel: ['取消', 'Cancel'],
   confirm: ['确定', 'Confirm'],
@@ -140,6 +140,7 @@ const TEXT = {
   'mode.off': ['关闭', 'Off'],
   'mode.observe': ['仅观察', 'Observe'],
   'mode.auto': ['自动接单', 'Auto'],
+  'source.local': ['本地任务', 'Local task'],
   'source.feishu': ['飞书', 'Feishu'],
   'source.github': ['GitHub', 'GitHub'],
   'source.github-issue': ['GitHub Issue', 'GitHub Issue'],

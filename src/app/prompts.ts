@@ -134,7 +134,7 @@ export class PromptConflict extends Error {}
 export class Prompts {
   private readonly versions: Versions<PromptVersion>
   constructor(private readonly store: Store, private readonly maxChars: () => number, private readonly environment: () => Variable[] | undefined,
-    private readonly feishu: () => boolean, private readonly localMode: () => boolean = () => false) {
+    private readonly localMode: () => boolean = () => false) {
     this.versions = new Versions(store, KV.prompts.revision, KV.prompts.version)
   }
   /** A role's prompt; the main Session's Policy section follows the settings as they are now, at each model request. */
@@ -142,7 +142,7 @@ export class Prompts {
     if(forceLocal || this.localMode()) return this.localParts(config,role,variables).map(part=>part.text).join('\n\n')
     return composePrompt(config, role, environmentSection(config, variables), role === 'orchestrator' ? policySection(this.store.settings(), config) : undefined)
   }
-  /** Returns skills to register in every Session: built-in Source skills (`feishu` only when a Feishu bot is configured) followed by team skills. */
+  /** Returns the skills to register in every Session: the team's saved skills, in their saved order. */
   skills(config: PromptConfig): [string, string][] {
     return Object.keys(config.skills).map(name => [name, composeSkill(config, name)])
   }
