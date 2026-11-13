@@ -399,11 +399,11 @@ it('reports a Source that was switched on as starting until its next pass report
   runtime.context(githubKind).report('github', { state: 'paused', detail: 'Off', code: 'sourceOff' })
   await save(true)
   expect(await github()).toEqual([{ name: 'github', state: 'starting', detail: '' }])
-  // A part that reports something else, such as a missing CLI, keeps its report: no pass may come to replace it.
+  // A part that reports something else, such as failed polls, keeps its report: no pass may come to replace it.
   await save(false)
-  runtime.context(githubKind).report('github', { state: 'paused', detail: 'x', code: 'feishuCliUnset' })
+  runtime.context(githubKind).report('github', { state: 'error', detail: 'x', code: 'pollFailures', values: { count: '3', error: 'x' } })
   await save(true)
-  expect(await github()).toEqual([expect.objectContaining({ code: 'feishuCliUnset' })])
+  expect(await github()).toEqual([expect.objectContaining({ code: 'pollFailures' })])
 })
 
 

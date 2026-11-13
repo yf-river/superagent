@@ -57,3 +57,26 @@ it('has words for every reason code the core records', () => {
 it('words the reasons agents read in the glossary\'s words: a sender on the list, a Thread', () => {
   expect(Object.values(REASONS).filter(text => /\b(member|members|topic)\b/i.test(text))).toEqual([])
 })
+
+it('keeps no copy for a surface the bundle no longer renders', async () => {
+  // A key nothing reads is copy for a removed surface. Dynamic keys are reached through a template literal with a literal
+  // prefix (`t(`task.stage.${stage}`)`) or through `valueLabel(t, group, key)`; both count as reads here.
+  const { readFileSync, readdirSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const files: string[] = []
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) walk(path)
+      else if (/\.(ts|tsx)$/.test(entry.name) && !path.endsWith('src/client/locales.ts')) files.push(path)
+    }
+  }
+  walk('src'); walk('tests')
+  const code = files.map(file => readFileSync(file, 'utf8')).join('\n')
+  const prefixes = [...new Set([
+    ...[...code.matchAll(/`([A-Za-z][\w./-]*\.)\$\{/g)].map(match => match[1]!),
+    ...[...code.matchAll(/valueLabel\(t,\s*'([\w-]+)'/g)].map(match => `${match[1]}.`),
+  ])]
+  const unread = Object.keys(zh).filter(key => !code.includes(key) && !prefixes.some(prefix => key.startsWith(prefix)))
+  expect(unread).toEqual([])
+})
